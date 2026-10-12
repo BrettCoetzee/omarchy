@@ -129,6 +129,7 @@ Item {
   // closed when it maps (handleScreensaverWindowOpened), or by a rerun.
   function stopScreensavers() {
     root.stopRequested = true
+    stopRequestTimer.restart()
     if (screensaverStopProcess.running) {
       root.stopPending = true
       return
@@ -140,7 +141,12 @@ Item {
   function handlePowerSourceChanged() {
     if (!UPower.onBattery || !root.idledThisCycle || root.blankedOnBattery) return
     if (!root.screensaverStartedThisCycle || root.screensaverWindowCount === 0) return
-    blankOnBattery("unplugged-during-screensaver")
+    // The idle monitor only reports a change, so blanking while it already
+    // counts as active (the mouse moved over the screensaver, say) would leave
+    // nothing to wake the displays. End the cycle instead; the next idle
+    // period starts a new one, which blanks on battery.
+    if (idleMonitor.isIdle) blankOnBattery("unplugged-during-screensaver")
+    else cancelIdleCycle("unplugged-while-active")
     stopScreensavers()
   }
 
@@ -360,15 +366,13 @@ Item {
     onIsIdleChanged: root.handleIdleChanged()
   }
 
-  // While blanked on battery, any input after a second of quiet wakes the
-  // displays, even when the main monitor already counts as active (input while
-  // the screensaver was up, or its own launch) and so reports no change.
-  IdleMonitor {
-    id: blankWakeMonitor
-    enabled: root.blankedOnBattery
-    timeout: 1
-    respectInhibitors: false
-    onIsIdleChanged: if (!isIdle && root.blankedOnBattery) root.cancelIdleCycle("activity")
+  // The launcher opens one screensaver per monitor within a few seconds; a stop
+  // request covers those, then lapses so a later manual launch is left alone.
+  Timer {
+    id: stopRequestTimer
+    interval: 10000
+    repeat: false
+    onTriggered: root.stopRequested = false
   }
 
   Timer {
