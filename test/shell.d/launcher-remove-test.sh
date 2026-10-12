@@ -38,8 +38,10 @@ chmod +x "$tmp_dir/bin/update-desktop-database"
 
 cat >"$tmp_dir/bin/pacman" <<'SCRIPT'
 #!/bin/bash
-if [[ $1 == "-Qqo" && $2 == */native.desktop ]]; then
+if [[ $1 == "-Qqo" && $2 == "$XDG_DATA_DIRS"/applications/native.desktop ]]; then
   printf 'native-pkg\n'
+elif [[ $1 == "-Qqo" && $2 == "$XDG_DATA_DIRS"/applications/chromium.desktop ]]; then
+  printf 'chromium\n'
 fi
 SCRIPT
 chmod +x "$tmp_dir/bin/pacman"
@@ -68,6 +70,19 @@ Name=Aliens
 Exec=retroarch -L /usr/lib/libretro/fbneo_libretro.so /home/example/Games/roms/fbneo/aliens.zip
 DESKTOP
 
+cat >"$tmp_dir/system/applications/chromium.desktop" <<'DESKTOP'
+[Desktop Entry]
+Name=Chromium
+Exec=chromium %U
+DESKTOP
+
+cat >"$tmp_dir/data/applications/chromium.desktop" <<'DESKTOP'
+[Desktop Entry]
+X-Omarchy-Browser-Handoff=true
+Name=Chromium
+Exec=omarchy-cmd-browser-open chromium %U
+DESKTOP
+
 export TEST_LOG="$tmp_dir/log"
 export PATH="$tmp_dir/bin:$PATH"
 export XDG_DATA_HOME="$tmp_dir/data"
@@ -77,6 +92,7 @@ export XDG_DATA_DIRS="$tmp_dir/system"
 "$ROOT/bin/omarchy-remove-launcher-entry" Docker.desktop Docker
 "$ROOT/bin/omarchy-remove-launcher-entry" native.desktop Native
 "$ROOT/bin/omarchy-remove-launcher-entry" aliens.desktop Aliens
+"$ROOT/bin/omarchy-remove-launcher-entry" chromium.desktop Chromium
 
 mapfile -t lines <"$TEST_LOG"
 
@@ -92,5 +108,9 @@ pass "launcher remove opens package uninstall flow"
 [[ ! -e $tmp_dir/data/applications/aliens.desktop ]] || fail "launcher remove deletes user-owned desktop files"
 pass "launcher remove deletes user-owned desktop files"
 
-(( ${#lines[@]} == 3 )) || fail "launcher remove does not notify for user-owned desktop files" "$(printf '%s\n' "${lines[@]}")"
+[[ ${lines[3]} == "terminal::echo Uninstalling Chromium...; sudo pacman -Rns chromium" ]] ||
+  fail "launcher remove uninstalls the browser behind its link hand-off entry" "${lines[3]}"
+pass "launcher remove uninstalls the browser behind its link hand-off entry"
+
+(( ${#lines[@]} == 4 )) || fail "launcher remove does not notify for user-owned desktop files" "$(printf '%s\n' "${lines[@]}")"
 pass "launcher remove does not notify for user-owned desktop files"

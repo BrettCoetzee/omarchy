@@ -41,7 +41,9 @@ fi
 desktop_file=""
 for dir in "${desktop_dirs[@]}"; do
   candidate="$dir/$desktop_file_name"
-  if [[ -f $candidate ]]; then
+  # The default browser's link hand-off copy stands in for the browser's own
+  # entry, so removing it means uninstalling the browser behind it.
+  if [[ -f $candidate ]] && ! grep -qxF "X-Omarchy-Browser-Handoff=true" "$candidate"; then
     desktop_file="$candidate"
     break
   fi
