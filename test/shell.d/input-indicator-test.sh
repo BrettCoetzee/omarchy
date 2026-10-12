@@ -434,6 +434,25 @@ with patch.dict(os.environ, {"XDG_CONFIG_HOME": fresh_root + "/config"}):
   run_until(0.3)
   assert events, "the first save of a new profile is seen"
   context.pop_thread_default()
+
+# A configuration beside the home directory, under a shared parent, is still
+# watched from its nearest existing directory.
+beside_root = tempfile.mkdtemp()
+os.makedirs(beside_root + "/home")
+with patch.dict(os.environ, {"HOME": beside_root + "/home", "FCITX_CONFIG_HOME": beside_root + "/fcitx5"}):
+  assert indicator.watched_entries() == [(beside_root, "fcitx5")], indicator.watched_entries()
+
+# The path changing while the watches are armed is resolved again.
+armed = []
+real_new_for_path = indicator.Gio.File.new_for_path
+def recording_new_for_path(path):
+  armed.append(path)
+  return real_new_for_path(path)
+early, late = [(fresh_root, "config")], [(fresh_root + "/config", "fcitx5")]
+with patch.object(indicator, "watched_entries", side_effect=[early, late, late]), \
+     patch.object(indicator.Gio.File, "new_for_path", side_effect=recording_new_for_path):
+  indicator.ProfileWatch(lambda: None)
+assert armed == [fresh_root, fresh_root + "/config"], armed
 print("ok - a missing configuration is watched until it exists, and a vanishing link keeps its watch")
 
 groups.append("Second")

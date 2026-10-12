@@ -162,9 +162,10 @@ def watched_entries(hops=40):
     if part == "..":
       current = os.path.dirname(current)
       continue
-    if not home.startswith(current.rstrip("/") + "/"):
-      entries.append((current, part))
     candidate = os.path.join(current, part)
+    # The way down to the home directory changes with a new session, not a save.
+    if candidate != home and not home.startswith(candidate + "/"):
+      entries.append((current, part))
     try:
       target = os.readlink(candidate) if hops > 0 else None
     except OSError:
@@ -191,15 +192,21 @@ class ProfileWatch:
     self.bind()
 
   def bind(self):
-    # Resolve before dropping the old watches, so a failure keeps them.
+    # Resolve before dropping the old watches, so a failure keeps them, and
+    # again once the new ones are armed, in case the path changed in between.
     entries = watched_entries()
-    for monitor in self.monitors:
-      monitor.cancel()
-    self.monitors = []
-    for directory, name in entries:
-      monitor = Gio.File.new_for_path(directory).monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
-      monitor.connect("changed", self.entry_changed, name)
-      self.monitors.append(monitor)
+    for _ in range(10):
+      for monitor in self.monitors:
+        monitor.cancel()
+      self.monitors = []
+      for directory, name in entries:
+        monitor = Gio.File.new_for_path(directory).monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
+        monitor.connect("changed", self.entry_changed, name)
+        self.monitors.append(monitor)
+      armed, entries = entries, watched_entries()
+      if entries == armed:
+        return
+    # Still moving: whoever is changing it will send another event.
 
   def entry_changed(self, monitor, file, other, event, name):
     if name not in (file.get_basename(), other.get_basename() if other else None):
