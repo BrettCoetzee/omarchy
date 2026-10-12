@@ -144,6 +144,20 @@ sleep 1
 pass "effects play one after another, and none starts after the screensaver ends"
 stop_screensaver
 
+# omarchy-system-lock stops ttfx and waits for it before closing the window;
+# an effect ended that way starts no replacement.
+start_screensaver org.omarchy.screensaver 0.3
+sleep 1
+xargs -r kill 2>/dev/null <"$tmpdir/ttfx.pids" || true
+sleep 0.3
+effects=$(wc -l <"$tmpdir/ttfx")
+sleep 1
+(( $(wc -l <"$tmpdir/ttfx") == effects )) || fail "an effect stopped from outside starts no other" "$(<"$tmpdir/order")"
+pass "an effect stopped from outside, as locking does, starts no other"
+printf 'x' >&"$keys"
+wait_for "$tmpdir/done" || fail "a key still ends the screensaver once its effects stop"
+stop_screensaver
+
 # Without Hyprland's event stream focus can't be followed, so it leaves.
 start_screensaver org.omarchy.screensaver
 sleep 1.5
