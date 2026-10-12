@@ -33,14 +33,16 @@ Item {
   property bool asynchronous: true
   readonly property alias status: image.status
   readonly property bool sized: width > 0 && height > 0
-  // Clipboard captures name the file after the MIME subtype, as in .svg+xml.
-  readonly property bool scalable: /(\.svgz?|\.svg\+xml)([?#].*)?$|^data:image\/svg/i.test(String(url))
+  // Clipboard captures name the file after the MIME subtype, as in .svg+xml,
+  // and Util.fileUrl percent-encodes the plus.
+  readonly property bool scalable: /(\.svgz?|\.svg(\+|%2B)xml)([?#].*)?$|^data:image\/svg/i.test(String(url))
   readonly property real reach: crop ? 2 : 1
   // A strip thin enough that fitting it in the bound rounds its short side
-  // to nothing decodes empty, so it falls back to the file's own size, which
-  // for such a strip is small anyway.
-  property bool nativeDecode: false
-  onUrlChanged: nativeDecode = false
+  // to nothing decodes empty. It is decoded again covering a single pixel
+  // instead: one pixel across and its aspect ratio long, still a sliver of
+  // the file however large that is.
+  property bool thinDecode: false
+  onUrlChanged: thinDecode = false
 
   clip: crop
 
@@ -62,14 +64,17 @@ Item {
       : (root.height - height) / 2
 
     source: root.sized ? root.url : ""
-    readonly property bool bounded: root.sized && !root.scalable && !root.nativeDecode
-    sourceSize.width: bounded ? Math.ceil(root.width * root.reach * Screen.devicePixelRatio) : 0
-    sourceSize.height: bounded ? Math.ceil(root.height * root.reach * Screen.devicePixelRatio) : 0
+    readonly property bool bounded: root.sized && !root.scalable && !root.thinDecode
+    sourceSize.width: bounded ? Math.ceil(root.width * root.reach * Screen.devicePixelRatio) : root.thinDecode ? 1 : 0
+    sourceSize.height: bounded ? Math.ceil(root.height * root.reach * Screen.devicePixelRatio) : root.thinDecode ? 1 : 0
     onStatusChanged: {
       var empty = status === Image.Error || (status === Image.Ready && (implicitWidth === 0 || implicitHeight === 0))
-      if (bounded && empty) root.nativeDecode = true
+      if (bounded && empty) root.thinDecode = true
     }
-    fillMode: !root.scalable ? Image.Stretch : root.crop ? Image.PreserveAspectCrop : Image.PreserveAspectFit
+    // A thin decode covers its 1x1 bound, so its short side is one pixel.
+    fillMode: root.scalable || root.thinDecode
+      ? (root.crop || root.thinDecode ? Image.PreserveAspectCrop : Image.PreserveAspectFit)
+      : Image.Stretch
     horizontalAlignment: root.horizontalAlignment
     verticalAlignment: root.verticalAlignment
     asynchronous: root.asynchronous

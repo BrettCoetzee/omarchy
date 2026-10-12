@@ -60,14 +60,14 @@ Item {
     url: root.narrowImage
   }
 
-  // A 4000x10 strip, thin enough that fitting it in a 60px bound rounds its
-  // height to nothing.
+  // An 8000x4 strip, thin enough that fitting it in the bound rounds its
+  // height to nothing at any device pixel ratio below 16.
   SizedImage {
     id: hairline
     width: 60
     height: 60
     crop: true
-    url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAD6AAAAAKCAMAAACXblFRAAAAA1BMVEUA/wA0XsCoAAAAPUlEQVR42u3BgQAAAADDoPlTH+AKVQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG+cSgABzUFeLgAAAABJRU5ErkJggg=="
+    url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAH0AAAAAECAMAAAA0cPmbAAAAA1BMVEUA/wA0XsCoAAAANUlEQVR42u3BMQEAAADCoPVP7WkJoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABufQQAAcZAqtEAAAAASUVORK5CYII="
   }
 
   // A 400x10 SVG strip.
@@ -150,7 +150,8 @@ Item {
     function test_a_strip_too_thin_to_shrink_still_draws() {
       tryVerify(function() { return hairline.status === Image.Ready && bitmap(hairline).height > 0 }, 2000,
         "decoded " + bitmap(hairline).width + "x" + bitmap(hairline).height)
-      compare(bitmap(hairline).width, 4000, "at the file's own size")
+      compare(bitmap(hairline).height, 1, "one pixel across")
+      compare(bitmap(hairline).width, 2000, "and its aspect ratio long, not the file's 8000x4")
       compare(painted(hairline).height, 60, "covering the box")
     }
 
@@ -158,6 +159,8 @@ Item {
       var probe = Qt.createQmlObject('import "../../../../shell/Ui"; SizedImage {}', root)
       probe.url = "file:///state/clipboard-images/abc.svg+xml"
       verify(probe.scalable, "a capture named after image/svg+xml")
+      probe.url = "file:///state/clipboard-images/abc.svg%2Bxml"
+      verify(probe.scalable, "the same capture as Util.fileUrl encodes it")
       probe.url = "file:///state/clipboard-images/abc.svg"
       verify(probe.scalable, "a plain .svg")
       probe.url = "file:///state/clipboard-images/abc.png"
