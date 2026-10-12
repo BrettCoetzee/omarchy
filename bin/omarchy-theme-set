@@ -556,8 +556,11 @@ apply_other_theme_commands() {
   # it waited, so an older theme never lands after a newer one.
   exec 8>"$THEME_RETINT_LOCK"
   flock 8
+  # The log starts over with each batch. An older batch's hook may still be
+  # writing to it, so every batch appends rather than writing at its offset.
   if [[ $detached == "detached" ]]; then
-    exec 2>"$THEME_SET_LOG"
+    : >"$THEME_SET_LOG"
+    exec 2>>"$THEME_SET_LOG"
   fi
   if [[ $(stat -Lc '%d:%i' "$CURRENT_THEME_PATH" 2>/dev/null) == "$APPLIED_THEME_ID" ]]; then
     run_parallel "${other_theme_commands[@]}"

@@ -41,11 +41,22 @@ if [[ $name == omarchy-theme-set-browser ]]; then
   echo "browser-for $theme" >>"$TEST_LOG"
 fi
 echo "$name" >>"$TEST_LOG"
+# With TEST_SLOW_HOOK_THEME, that theme's hook writes to stderr only once the
+# test says a later batch is done.
+if [[ $name == omarchy-hook && -n ${TEST_SLOW_HOOK_THEME:-} && $2 == "$TEST_SLOW_HOOK_THEME" ]]; then
+  touch "$TEST_TMP/slow-hook-started"
+  for attempt in {1..250}; do
+    [[ ! -f $TEST_TMP/later-batch-done ]] || break
+    sleep 0.02
+  done
+  echo "late output from the $2 hook" >&2
+fi
 # With TEST_HOOK_SWITCH, the theme-set hook switches to that theme itself.
 if [[ $name == omarchy-hook && -n ${TEST_HOOK_SWITCH:-} && $2 != "$TEST_HOOK_SWITCH" ]]; then
   OMARCHY_THEME_WAIT=1 /bin/bash "$TEST_ROOT/bin/omarchy-theme-set" "$TEST_HOOK_SWITCH" </dev/null >/dev/null 2>&1
 fi
-[[ $name != omarchy-theme-set-vscode ]]
+# The VS Code retint fails, except for TEST_VSCODE_OK_THEME.
+[[ $name != omarchy-theme-set-vscode || $(<"$TEST_STATE/theme.name") == "${TEST_VSCODE_OK_THEME:-}" ]]
 STUB
 cat >"$commands/noop" <<'STUB'
 #!/bin/bash
@@ -194,3 +205,25 @@ wait_for_detached_work
 [[ $(<"$state/theme.name") == "beta" ]] || fail "the hook's switch applies"
 grep -qx 'browser-for beta' "$log" || fail "a switch made from a theme-set hook runs its retints" "$(cat "$log")"
 pass "a theme-set hook can switch the theme without deadlocking the retints"
+
+# Alpha's hook is still running when beta's batch starts the log over; its
+# late output must not write over what beta's batch reported.
+rm -f "$test_tmp/held" "$test_tmp/slow-hook-started" "$test_tmp/later-batch-done"
+touch "$test_tmp/release"
+TEST_VSCODE_OK_THEME=alpha TEST_SLOW_HOOK_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
+for attempt in {1..250}; do
+  [[ ! -f $test_tmp/slow-hook-started ]] || break
+  sleep 0.02
+done
+TEST_VSCODE_OK_THEME=alpha TEST_SLOW_HOOK_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme beta
+for attempt in {1..250}; do
+  (( $(grep -c '^notify: ' "$log") >= 1 )) && break
+  sleep 0.02
+done
+touch "$test_tmp/later-batch-done"
+wait_for_detached_work
+grep -qx 'Theme retint failed: omarchy-theme-set-vscode' "$home/.local/state/omarchy/theme-set.log" ||
+  fail "an older batch's late output leaves the newer batch's report intact" "$(cat "$home/.local/state/omarchy/theme-set.log")"
+grep -qx 'late output from the alpha hook' "$home/.local/state/omarchy/theme-set.log" ||
+  fail "an older batch's late output is still logged" "$(cat "$home/.local/state/omarchy/theme-set.log")"
+pass "overlapping batches append to the theme-set log"
