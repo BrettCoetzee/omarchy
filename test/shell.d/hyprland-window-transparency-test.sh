@@ -207,7 +207,7 @@ if command -v script >/dev/null; then
   # Only the foot lookup is faked; anything else goes to the real pgrep. Every
   # call is logged, since each one scans the whole process table.
   real_pgrep=$(command -v pgrep)
-  printf '#!/bin/bash\necho "$*" >>%s\nif [[ $1 == "-x" && $2 == "foot" ]]; then echo %s; else exec %s "$@"; fi\n' "$tmpdir/pgrep.log" "$script_pid" "$real_pgrep" >"$tmpdir/foot-bin/pgrep"
+  printf '#!/bin/bash\necho "$*" >>%q\nif [[ $1 == "-x" && $2 == "foot" ]]; then echo %s; else exec %q "$@"; fi\n' "$tmpdir/pgrep.log" "$script_pid" "$real_pgrep" >"$tmpdir/foot-bin/pgrep"
   chmod +x "$tmpdir/foot-bin/pgrep"
 
   set_foot() {
