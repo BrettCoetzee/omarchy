@@ -77,10 +77,21 @@ cat >"$commands/hyprctl" <<'STUB'
 #!/bin/bash
 printf '{"bool":true}\n'
 STUB
-# The new theme's intro stays on screen until the test lets it finish.
+# The new theme's intro stays on screen until the test lets it finish. While
+# $TEST_TMP/intro-hold exists, beta's intro keeps playing even after another
+# theme replaced it.
 cat >"$commands/omarchy-shell" <<'STUB'
 #!/bin/bash
-if [[ $2 == "themeIntroStatus" && $(<"$TEST_STATE/theme.name") == "beta" && ! -f $TEST_TMP/intro-done ]]; then
+if [[ $2 == "themeIntroStatus" && -f $TEST_TMP/intro-hold ]]; then
+  if [[ $(<"$TEST_STATE/theme.name") == "beta" && $3 == "$(stat -Lc '%d:%i' "$TEST_STATE/theme")" ]]; then
+    echo "$3" >"$TEST_TMP/intro-hold"
+  fi
+  if [[ $3 == "$(<"$TEST_TMP/intro-hold")" ]]; then
+    echo "pending"
+  else
+    echo "ready"
+  fi
+elif [[ $2 == "themeIntroStatus" && $(<"$TEST_STATE/theme.name") == "beta" && ! -f $TEST_TMP/intro-done ]]; then
   echo "pending"
 else
   echo "ready"
@@ -227,3 +238,26 @@ grep -qx 'Theme retint failed: omarchy-theme-set-vscode' "$home/.local/state/oma
 grep -qx 'late output from the alpha hook' "$home/.local/state/omarchy/theme-set.log" ||
   fail "an older batch's late output is still logged" "$(cat "$home/.local/state/omarchy/theme-set.log")"
 pass "overlapping batches append to the theme-set log"
+
+# Beta's batch waits out its intro while alpha is picked and alpha's batch
+# reports a failure. Beta's batch, superseded, must leave alpha's report in the
+# log the notification points to.
+rm -f "$test_tmp/release" "$test_tmp/held" "$test_tmp/intro-done"
+touch "$test_tmp/release"
+OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
+wait_for_detached_work
+touch "$test_tmp/intro-hold"
+set_theme beta
+for attempt in {1..250}; do
+  [[ ! -s $test_tmp/intro-hold ]] || break
+  sleep 0.02
+done
+[[ -s $test_tmp/intro-hold ]] || fail "beta's batch waits for its intro"
+OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme alpha
+wait_logged '^notify: ' "alpha's batch reports its failure"
+rm -f "$test_tmp/intro-hold"
+wait_for_detached_work
+grep -qx 'Theme retint failed: omarchy-theme-set-vscode' "$home/.local/state/omarchy/theme-set.log" ||
+  fail "a superseded batch leaves the newer batch's report in the log" "$(cat "$home/.local/state/omarchy/theme-set.log")"
+(( $(grep -c '^browser-for ' "$log") == 1 )) || fail "only alpha's batch retints" "$(cat "$log")"
+pass "a superseded batch leaves the theme-set log to the newer one"
