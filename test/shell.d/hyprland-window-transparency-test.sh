@@ -214,7 +214,10 @@ if command -v script >/dev/null; then
     : >"$tmpdir/pgrep.log"
     HOME="$foot_home" PATH="$tmpdir/foot-bin:$ROOT/bin:$PATH" omarchy-theme-set-foot
     sleep 0.3
-    (( $(wc -l <"$tmpdir/pgrep.log") == 1 )) || fail "a foot retint scans the processes once" "$(cat "$tmpdir/pgrep.log")"
+    # A kernel without CONFIG_PROC_CHILDREN needs a second scan for the shells.
+    scans=1
+    [[ -e /proc/$script_pid/task/$script_pid/children ]] || scans=2
+    (( $(wc -l <"$tmpdir/pgrep.log") == scans )) || fail "a foot retint scans the processes once" "$(cat "$tmpdir/pgrep.log")"
   }
 
   set_foot
