@@ -45,6 +45,8 @@ Item {
   // image can't carry the fallback over to it.
   property string thinUrl: ""
   readonly property bool thinDecode: thinUrl !== "" && thinUrl === String(url)
+  property string failedUrl: ""
+  onUrlChanged: failedUrl = ""
 
   clip: crop
 
@@ -70,8 +72,26 @@ Item {
     sourceSize.width: bounded ? Math.ceil(root.width * root.reach * Screen.devicePixelRatio) : root.thinDecode ? 1 : 0
     sourceSize.height: bounded ? Math.ceil(root.height * root.reach * Screen.devicePixelRatio) : root.thinDecode ? 1 : 0
     onStatusChanged: {
-      var empty = status === Image.Error || (status === Image.Ready && (implicitWidth === 0 || implicitHeight === 0))
-      if (bounded && empty) root.thinUrl = String(source)
+      var loaded = String(source)
+      if (root.thinDecode) {
+        // A strip that really rounded away comes back longer than the bound.
+        // Anything shorter was an ordinary image whose bounded load failed
+        // for another reason, such as a file that only appeared later, so
+        // load it bounded again; a failure here gives up on the fallback.
+        var bound = Math.ceil(Math.max(root.width, root.height) * root.reach * Screen.devicePixelRatio)
+        if (status === Image.Error || (status === Image.Ready && Math.max(implicitWidth, implicitHeight) < bound)) root.thinUrl = ""
+        return
+      }
+      if (!bounded) return
+      if (status === Image.Ready && (implicitWidth === 0 || implicitHeight === 0)) {
+        root.thinUrl = loaded
+      } else if (status === Image.Error && root.failedUrl !== loaded) {
+        // Some decoders fail outright where a thin PNG comes back empty. Try
+        // the fallback once per URL, so a file that is simply missing does
+        // not keep reloading.
+        root.failedUrl = loaded
+        root.thinUrl = loaded
+      }
     }
     // A thin decode covers its 1x1 bound, so its short side is one pixel.
     fillMode: root.scalable || root.thinDecode

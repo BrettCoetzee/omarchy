@@ -168,6 +168,22 @@ Item {
         "and the strip falls back again: " + bitmap(hairline).width + "x" + bitmap(hairline).height)
     }
 
+    // A failed load is not taken for a thin strip, and does not keep retrying.
+    function test_a_missing_file_is_tried_a_few_times_then_left() {
+      var missing = Qt.createQmlObject('import "../../../../shell/Ui"; SizedImage { width: 40; height: 40; url: "file:///nonexistent/omarchy-sized-image.png" }', root)
+      var spy = Qt.createQmlObject('import QtTest; SignalSpy { signalName: "statusChanged" }', root)
+      spy.target = missing
+      tryCompare(missing, "status", Image.Error)
+      wait(300)
+      verify(!missing.thinDecode, "the URL is not remembered as a thin strip")
+      verify(spy.count <= 12, "and it stops retrying: " + spy.count + " status changes")
+      var settled = spy.count
+      wait(300)
+      compare(spy.count, settled, "nothing more happens")
+      missing.destroy()
+      spy.destroy()
+    }
+
     function test_clipboard_svg_captures_count_as_svgs() {
       var probe = Qt.createQmlObject('import "../../../../shell/Ui"; SizedImage {}', root)
       probe.url = "file:///state/clipboard-images/abc.svg+xml"
