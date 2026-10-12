@@ -204,14 +204,17 @@ if command -v script >/dev/null; then
   script_pid=$!
   for _ in {1..50}; do pgrep -P "$script_pid" >/dev/null && break; sleep 0.1; done
 
-  # Only the foot lookup is faked; finding its shell goes to the real pgrep.
+  # Only the foot lookup is faked; anything else goes to the real pgrep. Every
+  # call is logged, since each one scans the whole process table.
   real_pgrep=$(command -v pgrep)
-  printf '#!/bin/bash\nif [[ $1 == "-x" && $2 == "foot" ]]; then echo %s; else exec %s "$@"; fi\n' "$script_pid" "$real_pgrep" >"$tmpdir/foot-bin/pgrep"
+  printf '#!/bin/bash\necho "$*" >>%s\nif [[ $1 == "-x" && $2 == "foot" ]]; then echo %s; else exec %s "$@"; fi\n' "$tmpdir/pgrep.log" "$script_pid" "$real_pgrep" >"$tmpdir/foot-bin/pgrep"
   chmod +x "$tmpdir/foot-bin/pgrep"
 
   set_foot() {
+    : >"$tmpdir/pgrep.log"
     HOME="$foot_home" PATH="$tmpdir/foot-bin:$ROOT/bin:$PATH" omarchy-theme-set-foot
     sleep 0.3
+    (( $(wc -l <"$tmpdir/pgrep.log") == 1 )) || fail "a foot retint scans the processes once" "$(cat "$tmpdir/pgrep.log")"
   }
 
   set_foot
@@ -220,7 +223,7 @@ if command -v script >/dev/null; then
   set_foot
   grep -qF $'\e]11;[65]#102030' "$tmpdir/typescript" || fail "running foot terminals turn glassy"
   kill "$script_pid" 2>/dev/null || true
-  pass "running foot terminals take the theme's background alpha"
+  pass "running foot terminals take the theme's background alpha, found in one process scan"
 else
   skip "script is not installed"
 fi
