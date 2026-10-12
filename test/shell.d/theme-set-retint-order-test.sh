@@ -39,6 +39,10 @@ if [[ $name == omarchy-theme-set-browser ]]; then
     done
   fi
   echo "browser-for $theme" >>"$TEST_LOG"
+  # The real one hands its stdin to the policy writer, which prompts there.
+  if [[ -n ${TEST_READ_STDIN:-} ]] && read -r -t 1 line; then
+    echo "browser-stdin $line" >>"$TEST_LOG"
+  fi
 fi
 echo "$name" >>"$TEST_LOG"
 # With TEST_SLOW_HOOK_THEME, that theme's hook writes to stderr only once the
@@ -261,3 +265,15 @@ grep -qx 'Theme retint failed: omarchy-theme-set-vscode' "$home/.local/state/oma
   fail "a superseded batch leaves the newer batch's report in the log" "$(cat "$home/.local/state/omarchy/theme-set.log")"
 (( $(grep -c '^browser-for ' "$log") == 1 )) || fail "only alpha's batch retints" "$(cat "$log")"
 pass "a superseded batch leaves the theme-set log to the newer one"
+
+# A switch that waits hands its stdin to the retints, so the browser policy
+# can prompt on the terminal the switch was typed in.
+rm -f "$test_tmp/held"
+touch "$test_tmp/release"
+: >"$log"
+printf 'typed-password\n' |
+  HOME="$home" OMARCHY_PATH="$ROOT" PATH="$commands:$ROOT/bin:$PATH" XDG_RUNTIME_DIR="$test_tmp" \
+    TEST_LOG="$log" TEST_TMP="$test_tmp" TEST_STATE="$state" TEST_ROOT="$ROOT" TEST_READ_STDIN=1 \
+    OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 /bin/bash "$ROOT/bin/omarchy-theme-set" alpha >/dev/null 2>&1
+grep -qx 'browser-stdin typed-password' "$log" || fail "a waited-for retint reads the switch's stdin" "$(cat "$log")"
+pass "a waited-for switch gives the retints its stdin"

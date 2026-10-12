@@ -38,12 +38,14 @@ FAILED_THEME_COMMANDS=()
 
 # Each command is an Omarchy command on the PATH this one already has, so it
 # runs directly rather than through a login shell that rereads the profile.
+# A background command would otherwise get /dev/null as stdin, and the browser
+# policy asks for a sudo password on stdin when it is a terminal.
 run_parallel() {
   local command index
   local -a commands=("$@") pids=()
 
   for command in "${commands[@]}"; do
-    "$command" 8>&- &
+    "$command" <&0 8>&- &
     pids+=("$!")
   done
 
