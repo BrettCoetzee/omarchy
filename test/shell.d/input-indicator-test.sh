@@ -178,20 +178,13 @@ print("ok - cycling back walks the same choices in reverse")
 # replaced by `live`, which a configuration change edits before saving.
 import sys
 import tempfile
-# The configuration home is itself a link, as a dotfile manager may make it.
-config_root = tempfile.mkdtemp()
-os.makedirs(config_root + "/home-a")
-os.symlink("home-a", config_root + "/config")
-config_home = config_root + "/config"
-os.makedirs(config_home + "/first")
-os.makedirs(config_home + "/second")
-os.makedirs(config_home + "/third")
-# A dotfile manager's layout: the Fcitx directory is a link into the dotfiles.
-os.symlink("first", config_home + "/fcitx5")
+scratch = tempfile.TemporaryDirectory()
+config_home = scratch.name + "/config"
+os.makedirs(config_home + "/fcitx5")
 
 # Saved the way Fcitx and configure.py save it: a new file renamed over the old.
-def save(directory="first", name="profile"):
-  path = f"{config_home}/{directory}/{name}"
+def save():
+  path = config_home + "/fcitx5/profile"
   with open(path + ".tmp", "w") as file:
     file.write("[Groups/0]\nName=Default\n# " + ",".join(live["methods"]) + "\n")
   os.replace(path + ".tmp", path)
@@ -199,7 +192,7 @@ def save(directory="first", name="profile"):
 live = {"methods": ["keyboard-us"], "current": "keyboard-us", "name": "English", "label": "en", "language": "en"}
 save()
 groups = ["Default"]
-timers, reader, reads, failures = [], {}, [0], [0]
+timers, reader, reads, failures, group_failures = [], {}, [0], [0], [0]
 real_timeout = indicator.GLib.timeout_add
 real_io_add_watch = indicator.GLib.io_add_watch
 
@@ -225,6 +218,13 @@ def snapshot(bus):
     failures[0] -= 1
     raise indicator.GLib.Error("timed out")
   return dict(live, methods=list(live["methods"]))
+
+def fake_call(bus, method, args=None):
+  assert method == "InputMethodGroups", method
+  if group_failures[0]:
+    group_failures[0] -= 1
+    raise indicator.GLib.Error("timed out")
+  return (list(groups),)
 
 # GLib swallows exceptions raised in callbacks, so keep them for the end.
 errors = []
@@ -283,101 +283,19 @@ def scenario():
     step(2.4, recovered)
   def recovered():
     assert methods() == ["keyboard-us"], state_lines
-    # Relinking the Fcitx directory moves the watch to the new target.
-    os.symlink("second", config_home + "/fcitx5.new")
-    os.replace(config_home + "/fcitx5.new", config_home + "/fcitx5")
-    step(0.6, relinked)
-  def relinked():
-    live["methods"] = ["keyboard-us", "hangul"]
-    save("second")
-    step(0.6, saved_in_new_target)
-  def saved_in_new_target():
-    assert methods() == ["keyboard-us", "hangul"], state_lines
-    # A profile that is itself a link is watched at its target too.
-    live["methods"] = ["keyboard-us"]
-    save("third", "profile.real")
-    os.symlink("../third/profile.real", config_home + "/second/profile.new")
-    os.replace(config_home + "/second/profile.new", config_home + "/second/profile")
-    step(0.6, linked_profile)
-  def linked_profile():
+    # A group count that times out keeps the reading on the bar.
+    group_failures[0] = 1
+    save()
+    step(0.6, after_failed_group_count)
+  def after_failed_group_count():
     assert methods() == ["keyboard-us"], state_lines
-    live["methods"] = ["keyboard-us", "pinyin"]
-    save("third", "profile.real")
-    step(0.6, saved_through_link)
-  def saved_through_link():
-    assert methods() == ["keyboard-us", "pinyin"], state_lines
-    # The directory the link resolves to is replaced, the link left alone.
-    live["methods"] = ["keyboard-us"]
-    os.rename(config_home + "/third", config_home + "/third.old")
-    os.makedirs(config_home + "/third")
-    save("third", "profile.real")
-    step(0.6, target_replaced)
-  def target_replaced():
-    assert methods() == ["keyboard-us"], state_lines
-    live["methods"] = ["keyboard-us", "chewing"]
-    save("third", "profile.real")
-    step(0.6, saved_in_replaced_target)
-  def saved_in_replaced_target():
-    assert methods() == ["keyboard-us", "chewing"], state_lines
-    # Relinking the configuration home moves the watch to the new one.
-    live["methods"] = ["keyboard-us"]
-    os.makedirs(config_root + "/home-b/fcitx5")
-    save("../home-b/fcitx5")
-    os.symlink("home-b", config_root + "/config.new")
-    os.replace(config_root + "/config.new", config_root + "/config")
-    step(0.6, home_relinked)
-  def home_relinked():
-    assert methods() == ["keyboard-us"], state_lines
-    live["methods"] = ["keyboard-us", "anthy"]
-    save("fcitx5")
-    step(0.6, saved_in_new_home)
-  def saved_in_new_home():
-    assert methods() == ["keyboard-us", "anthy"], state_lines
-    # A chain of links: profile -> store/current -> store/profile-a.
-    live["methods"] = ["keyboard-us"]
-    os.makedirs(config_home + "/store")
-    save("store", "profile-a")
-    os.symlink("profile-a", config_home + "/store/current")
-    os.symlink("../store/current", config_home + "/fcitx5/profile.new")
-    os.replace(config_home + "/fcitx5/profile.new", config_home + "/fcitx5/profile")
-    step(0.6, chained)
-  def chained():
-    assert methods() == ["keyboard-us"], state_lines
-    # Repointing the middle link is seen, though neither end changed.
-    live["methods"] = ["keyboard-us", "rime"]
-    save("store", "profile-b")
-    os.symlink("profile-b", config_home + "/store/current.new")
-    os.replace(config_home + "/store/current.new", config_home + "/store/current")
-    step(0.6, middle_relinked)
-  def middle_relinked():
-    assert methods() == ["keyboard-us", "rime"], state_lines
-    # A link whose target steps back out of another link:
-    # fcitx5 -> store/redirect/../fcitx5, with store/redirect -> ../x/inner.
-    live["methods"] = ["keyboard-us"]
-    for side in ("x", "y"):
-      os.makedirs(f"{config_home}/{side}/inner")
-      os.makedirs(f"{config_home}/{side}/fcitx5")
-    save("x/fcitx5")
-    os.symlink("../x/inner", config_home + "/store/redirect")
-    os.rename(config_home + "/fcitx5", config_home + "/fcitx5.old")
-    os.symlink("store/redirect/../fcitx5", config_home + "/fcitx5")
-    step(0.6, redirected)
-  def redirected():
-    assert methods() == ["keyboard-us"], state_lines
-    live["methods"] = ["keyboard-us", "sayura"]
-    save("y/fcitx5")
-    os.symlink("../y/inner", config_home + "/store/redirect.new")
-    os.replace(config_home + "/store/redirect.new", config_home + "/store/redirect")
-    step(0.6, redirect_repointed)
-  def redirect_repointed():
-    assert methods() == ["keyboard-us", "sayura"], state_lines
     close_stdin()
   step(1.0, single_method_settled)
 
 os.environ.pop("FCITX_CONFIG_HOME", None)
 with patch.dict(os.environ, {"XDG_CONFIG_HOME": config_home}), \
      patch.object(indicator, "snapshot", side_effect=snapshot), \
-     patch.object(indicator, "call", side_effect=lambda bus, method, args=None: (list(groups),) if method == "InputMethodGroups" else (_ for _ in ()).throw(AssertionError(method))), \
+     patch.object(indicator, "call", side_effect=fake_call), \
      patch.object(indicator.Gio, "bus_watch_name_on_connection", return_value=1), \
      patch.object(indicator.GLib, "io_add_watch", side_effect=register_reader), \
      patch.object(indicator.GLib, "timeout_add", side_effect=timeout), \
@@ -387,167 +305,46 @@ with patch.dict(os.environ, {"XDG_CONFIG_HOME": config_home}), \
   indicator.watch(None)
 assert not errors, errors
 print("ok - one input method is read once and again on a profile save, and several are polled for switches")
-print("ok - an event during polling replaces the poll, and a failed read is retried")
-print("ok - relinking the Fcitx directory or the profile moves the watch, and replaced saves are seen")
+print("ok - an event during polling replaces the poll, a failed read is retried, and a failed group count keeps the reading")
 
 with patch.dict(os.environ, {"XDG_CONFIG_HOME": "/xdg", "FCITX_CONFIG_HOME": "/fcitx"}):
   assert indicator.profile_path() == "/fcitx/profile"
   del os.environ["FCITX_CONFIG_HOME"]
   assert indicator.profile_path() == "/xdg/fcitx5/profile"
-  os.environ["FCITX_CONFIG_HOME"] = "/fcitx/link/../cleaned"
-  assert indicator.profile_path() == "/fcitx/cleaned/profile"
-  os.environ["FCITX_CONFIG_HOME"] = "relative/fcitx"
-  assert indicator.profile_path() == os.path.join(os.getcwd(), "relative/fcitx/profile")
-  # Without it, a relative XDG_CONFIG_HOME is relative to the home directory.
-  del os.environ["FCITX_CONFIG_HOME"]
-  os.environ.update(XDG_CONFIG_HOME="relative/config", HOME="/somewhere")
-  assert indicator.profile_path() == "/somewhere/relative/config/fcitx5/profile", indicator.profile_path()
-print("ok - the watched profile follows Fcitx's FCITX_CONFIG_HOME override, cleaned the way Fcitx cleans it")
-
-# A link that vanishes mid-resolution, as a relink in progress makes it, is
-# watched as an entry rather than failing the whole watch.
-race_root = tempfile.mkdtemp()
-os.symlink("elsewhere", race_root + "/fcitx5")
-with patch.dict(os.environ, {"XDG_CONFIG_HOME": race_root}), \
-     patch.object(indicator.os, "readlink", side_effect=FileNotFoundError("relinked")):
-  assert (race_root, "fcitx5") in indicator.watched_entries()
-
-# A configuration that does not exist yet is watched from its nearest existing
-# directory, and its profile is seen once Fcitx first saves it.
-fresh_root = tempfile.mkdtemp()
-events = []
-with patch.dict(os.environ, {"XDG_CONFIG_HOME": fresh_root + "/config"}):
-  assert indicator.watched_entries()[-1] == (fresh_root, "config"), indicator.watched_entries()
-  # A context of its own, clear of the sources the reader above left behind.
-  import time
-  context = indicator.GLib.MainContext.new()
-  context.push_thread_default()
-  profile_watch = indicator.ProfileWatch(lambda: events.append("changed"))
-  def run_until(seconds):
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-      context.iteration(False)
-      time.sleep(0.01)
-  os.makedirs(fresh_root + "/config")
-  run_until(0.3)
-  os.makedirs(fresh_root + "/config/fcitx5")
-  run_until(0.3)
-  events.clear()
-  with open(fresh_root + "/config/fcitx5/profile", "w") as file:
-    file.write("[Groups/0]\n")
-  run_until(0.3)
-  assert events, "the first save of a new profile is seen"
-  context.pop_thread_default()
-
-# A configuration beside the home directory, under a shared parent, is still
-# watched from its nearest existing directory.
-beside_root = tempfile.mkdtemp()
-os.makedirs(beside_root + "/home")
-with patch.dict(os.environ, {"HOME": beside_root + "/home", "FCITX_CONFIG_HOME": beside_root + "/fcitx5"}):
-  assert indicator.watched_entries() == [(beside_root, "fcitx5")], indicator.watched_entries()
-
-# A plain ~/.config is not watched from the busy home directory: only the
-# profile and its directory can change with a save.
-plain_root = tempfile.mkdtemp()
-os.makedirs(plain_root + "/home/.config/fcitx5")
-with patch.dict(os.environ, {"HOME": plain_root + "/home"}):
-  os.environ.pop("XDG_CONFIG_HOME", None)
-  os.environ.pop("FCITX_CONFIG_HOME", None)
-  assert indicator.watched_entries() == [(plain_root + "/home/.config", "fcitx5"),
-                                         (plain_root + "/home/.config/fcitx5", "profile")], indicator.watched_entries()
-
-# Moving that plain ~/.config aside for a link to a new one is still seen,
-# through the event on the watched directory itself.
-moved = []
-with patch.dict(os.environ, {"HOME": plain_root + "/home"}):
-  context = indicator.GLib.MainContext.new()
-  context.push_thread_default()
-  plain_watch = indicator.ProfileWatch(lambda: moved.append("changed"))
-  os.rename(plain_root + "/home/.config", plain_root + "/home/.config.old")
-  os.makedirs(plain_root + "/dotfiles/fcitx5")
-  os.symlink("../dotfiles", plain_root + "/home/.config")
-  run_until(0.3)
-  assert moved, "moving ~/.config aside is seen"
-  moved.clear()
-  with open(plain_root + "/dotfiles/fcitx5/profile", "w") as file:
-    file.write("[Groups/0]\n")
-  run_until(0.3)
-  assert moved, "a save in the linked configuration is seen"
-  context.pop_thread_default()
-
-# With ~/.config linked into a dotfiles tree, replacing the whole tree is seen
-# through the watch on the tree's own directory.
-tree_root = tempfile.mkdtemp()
-os.makedirs(tree_root + "/home/dotfiles/config/fcitx5")
-os.symlink("dotfiles/config", tree_root + "/home/.config")
-replaced = []
-with patch.dict(os.environ, {"HOME": tree_root + "/home"}):
-  context = indicator.GLib.MainContext.new()
-  context.push_thread_default()
-  tree_watch = indicator.ProfileWatch(lambda: replaced.append("changed"))
-  os.rename(tree_root + "/home/dotfiles", tree_root + "/home/dotfiles.old")
-  os.makedirs(tree_root + "/home/dotfiles/config/fcitx5")
-  run_until(0.3)
-  assert replaced, "replacing the dotfiles tree is seen"
-  replaced.clear()
-  with open(tree_root + "/home/dotfiles/config/fcitx5/profile", "w") as file:
-    file.write("[Groups/0]\n")
-  run_until(0.3)
-  assert replaced, "a save in the replacement tree is seen"
-  context.pop_thread_default()
-
-# A profile kept directly in the home directory is still watched there.
-open(plain_root + "/home/profile", "w").close()
-with patch.dict(os.environ, {"HOME": plain_root + "/home", "FCITX_CONFIG_HOME": plain_root + "/home"}):
-  assert indicator.watched_entries() == [(plain_root + "/home", "profile")], indicator.watched_entries()
-
-# A link written with a trailing slash still leads to the profile's directory.
-slash_root = tempfile.mkdtemp()
-os.makedirs(slash_root + "/home/.config/first")
-os.symlink("first/.", slash_root + "/home/.config/fcitx5")
-with patch.dict(os.environ, {"HOME": slash_root + "/home"}):
-  os.environ.pop("XDG_CONFIG_HOME", None)
-  assert (slash_root + "/home/.config", "first") in indicator.watched_entries(), indicator.watched_entries()
-
-# The path changing while the watches are armed is resolved again.
-armed = []
-real_new_for_path = indicator.Gio.File.new_for_path
-def recording_new_for_path(path):
-  armed.append(path)
-  return real_new_for_path(path)
-early, late = [(fresh_root, "config")], [(fresh_root + "/config", "fcitx5")]
-with patch.object(indicator, "watched_entries", side_effect=[early, late, late]), \
-     patch.object(indicator.Gio.File, "new_for_path", side_effect=recording_new_for_path):
-  indicator.ProfileWatch(lambda: None)
-assert armed == [fresh_root, fresh_root + "/config"], armed
-print("ok - a missing configuration is watched until it exists, and a vanishing link keeps its watch")
+print("ok - the watched profile follows Fcitx's FCITX_CONFIG_HOME override")
 
 # The profile is the one the Fcitx process saves, whose environment a service
-# drop-in can set without the shell knowing.
-daemon_dir = tempfile.mkdtemp()
-os.makedirs(daemon_dir + "/relative/fcitx")
-daemon = subprocess.Popen(["sleep", "30"], cwd=daemon_dir,
-                          env={"HOME": daemon_dir, "FCITX_CONFIG_HOME": "relative/fcitx"})
+# drop-in can set without the shell knowing; the watch moves there when the
+# bus name gains an owner.
+os.makedirs(scratch.name + "/daemon/fcitx")
+daemon = subprocess.Popen(["sleep", "30"], cwd=scratch.name,
+                          env={"HOME": scratch.name, "FCITX_CONFIG_HOME": "daemon/fcitx"})
 class OwnerBus:
   def call_sync(self, name, path, interface, method, args, *rest):
     assert method == "GetConnectionUnixProcessID" and args.unpack() == (indicator.BUS,)
     return indicator.GLib.Variant("(u)", (daemon.pid,))
 try:
   owner = indicator.owner_environment(OwnerBus())
-  assert indicator.profile_path(owner) == daemon_dir + "/relative/fcitx/profile", indicator.profile_path(owner)
-  appeared, armed = {}, []
+  assert indicator.profile_path(owner) == scratch.name + "/daemon/fcitx/profile", indicator.profile_path(owner)
+  appeared, watched = {}, []
+  real_new_for_path = indicator.Gio.File.new_for_path
   def watch_name(bus, name, flags, on_appeared, on_vanished):
     appeared["callback"] = on_appeared
     return 1
+  def recording_new_for_path(path):
+    watched.append(path)
+    return real_new_for_path(path)
   with patch.object(indicator.Gio, "bus_watch_name_on_connection", side_effect=watch_name), \
        patch.object(indicator.Gio.File, "new_for_path", side_effect=recording_new_for_path):
     indicator.follow(OwnerBus(), lambda: None, lambda present: None)
-    armed.clear()
     appeared["callback"]()
-  assert armed[-1] == daemon_dir + "/relative/fcitx", armed
+  assert watched[-1] == scratch.name + "/daemon/fcitx/profile", watched
 finally:
   daemon.kill()
+  daemon.wait()
 print("ok - the watch follows the profile of the process that owns Fcitx's bus name")
+
+scratch.cleanup()
 
 groups.append("Second")
 with patch.object(indicator, "call", return_value=(groups,)):

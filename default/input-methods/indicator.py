@@ -169,83 +169,25 @@ def profile_path(owner=None):
   return os.path.join(os.path.normpath(directory), "profile")
 
 
-def watched_entries(owner=None, hops=40):
-  # Saves rename a new profile into place, and a dotfile manager may link the
-  # profile, its directory or the configuration home elsewhere, chain links, or
-  # replace a linked directory or any directory above the profile. Resolve the
-  # path the way the kernel does, one component at a time, and watch each
-  # directory it passes through below the home directory, for the entry it
-  # looks up there and for the directory itself moving away. The home directory
-  # and those above it are busy and change with a session rather than a save,
-  # so they are watched only for an entry that is a link, is missing, or is the
-  # profile itself.
-  home = os.path.realpath((owner[0] if owner else os.environ).get("HOME") or os.path.expanduser("~"))
-  entries = []
-  current, pending = "/", profile_path(owner).split("/")
-  while pending:
-    part = pending.pop(0)
-    if part in ("", "."):
-      continue
-    if part == "..":
-      current = os.path.dirname(current)
-      continue
-    candidate = os.path.join(current, part)
-    try:
-      target = os.readlink(candidate) if hops > 0 else None
-    except OSError:
-      target = None
-    above_home = current == home or home.startswith(current.rstrip("/") + "/")
-    last = not [item for item in pending if item not in ("", ".")]
-    if not above_home or last or target is not None or not os.path.lexists(candidate):
-      entries.append((current, part))
-    if target is not None:
-      hops -= 1
-      if target.startswith("/"):
-        current = "/"
-      pending = target.split("/") + pending
-    elif os.path.lexists(candidate):
-      current = candidate
-    else:
-      # Nothing further exists yet; the watch on this entry sees it arrive.
-      break
-  return list(dict.fromkeys(entries))
-
-
 class ProfileWatch:
-  """Calls changed() whenever the profile Fcitx saves its configuration to changes."""
+  """Calls changed() whenever the profile Fcitx saves its configuration to changes.
+
+  The file is located once per Fcitx process, from that process's environment.
+  The watch follows renamed saves; inotify resolves a linked directory when the
+  watch is added, so relinking the dotfiles while Fcitx runs is picked up at
+  its next start.
+  """
 
   def __init__(self, changed):
     self.changed = changed
-    self.monitors = []
-    self.owner = None
-    self.bind()
+    self.monitor = None
+    self.bind(None)
 
-  def bind(self):
-    # Resolve before dropping the old watches, so a failure keeps them, and
-    # again once the new ones are armed, in case the path changed in between.
-    entries = watched_entries(self.owner)
-    for _ in range(10):
-      for monitor in self.monitors:
-        monitor.cancel()
-      self.monitors = []
-      for directory, name in entries:
-        monitor = Gio.File.new_for_path(directory).monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
-        monitor.connect("changed", self.entry_changed, directory, name)
-        self.monitors.append(monitor)
-      armed, entries = entries, watched_entries(self.owner)
-      if entries == armed:
-        return
-    # Still moving: whoever is changing it will send another event.
-
-  def entry_changed(self, monitor, file, other, event, directory, name):
-    # The watched directory itself moving away (a real ~/.config moved aside
-    # for a link, say) arrives as an event on the directory, not the entry.
-    moved = file.get_path() == directory
-    if not moved and name not in (file.get_basename(), other.get_basename() if other else None):
-      return
-    # A relinked or replaced entry may resolve somewhere new.
-    self.bind()
-    self.changed()
+  def bind(self, owner):
+    if self.monitor:
+      self.monitor.cancel()
+    self.monitor = Gio.File.new_for_path(profile_path(owner)).monitor_file(Gio.FileMonitorFlags.WATCH_MOVES, None)
+    self.monitor.connect("changed", lambda *_: self.changed())
 
 
 def follow(bus, changed, presence):
@@ -258,8 +200,7 @@ def follow(bus, changed, presence):
   def owner(present):
     presence(present)
     if present:
-      profile.owner = owner_environment(bus)
-      profile.bind()
+      profile.bind(owner_environment(bus))
     changed()
   name = Gio.bus_watch_name_on_connection(bus, BUS, Gio.BusNameWatcherFlags.NONE,
                                           lambda *_: owner(True), lambda *_: owner(False))
@@ -281,8 +222,6 @@ def watch(bus):
     nonlocal previous, polling, failed
     try:
       state = indicator.refresh()
-      polling = indicator.switchable(state["methods"])
-      failed = False
     except GLib.Error:
       failed = True
       indicator.pending = ""
@@ -290,6 +229,13 @@ def watch(bus):
       # Keep the configured cadence: a timed-out call is not a configuration
       # change, and a vanished service is followed by its bus name.
       state = {"methods": [], "current": "", "name": "", "language": ""}
+    else:
+      # A failed group count keeps the reading and the last cadence.
+      try:
+        polling = indicator.switchable(state["methods"])
+        failed = False
+      except GLib.Error:
+        failed = True
     line = json.dumps(state, ensure_ascii=False)
     if line != previous:
       print(line, flush=True)
