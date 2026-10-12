@@ -92,12 +92,14 @@ Item {
     else logEvent("screensaver-stage-skipped", "screensaver off")
   }
 
-  // Blank the displays the way the lock does, leaving the lock to its own
-  // deadline. Activity ends the cycle, and omarchy-system-wake turns them on.
+  // Blank the displays, leaving the lock to its own deadline. Activity ends the
+  // cycle, and omarchy-system-wake turns them on. The keyboard backlight is the
+  // lock's to save and turn off: blanking it here too would save the
+  // already-dark level over the one the lock should restore.
   function blankOnBattery(reason) {
     root.blankedOnBattery = true
     logEvent("battery-blank", reason)
-    runProcess(blankProcess, "battery-blank", "omarchy-brightness-keyboard off; omarchy-brightness-display off")
+    runProcess(blankProcess, "battery-blank", "omarchy-brightness-display off")
   }
 
   // Unplugged while the screensaver runs: close it and blank instead. Its
@@ -158,6 +160,8 @@ Item {
     lockTimer.stop()
     screensaverLaunchGraceTimer.stop()
 
+    // Waking must be the last display action, so stop a blank still running.
+    if (blankProcess.running) blankProcess.running = false
     if (root.idledThisCycle) runProcess(wakeProcess, "wake", "omarchy-system-wake")
 
     root.idledThisCycle = false
@@ -180,6 +184,8 @@ Item {
   function handleScreensaverWindowOpened(address) {
     setScreensaverWindow(address, true)
     screensaverLaunchGraceTimer.stop()
+    // Unplugged while it was still starting.
+    handlePowerSourceChanged()
   }
 
   function handleScreensaverWindowClosed(address) {
@@ -212,6 +218,12 @@ Item {
 
   function handleActiveSignal() {
     if (!root.idledThisCycle) return
+
+    // Once blanked on battery there is no screensaver to keep armed for.
+    if (root.blankedOnBattery) {
+      cancelIdleCycle("activity")
+      return
+    }
 
     // Starting the screensaver can make the compositor report activity. Keep
     // the lock timer running once the screensaver exists (or during its short
