@@ -302,9 +302,23 @@ def scenario():
     step(0.6, saved_through_link)
   def saved_through_link():
     assert methods() == ["keyboard-us", "pinyin"], state_lines
+    # The directory the link resolves to is replaced, the link left alone.
+    live["methods"] = ["keyboard-us"]
+    os.rename(config_home + "/third", config_home + "/third.old")
+    os.makedirs(config_home + "/third")
+    save("third", "profile.real")
+    step(0.6, target_replaced)
+  def target_replaced():
+    assert methods() == ["keyboard-us"], state_lines
+    live["methods"] = ["keyboard-us", "chewing"]
+    save("third", "profile.real")
+    step(0.6, saved_in_replaced_target)
+  def saved_in_replaced_target():
+    assert methods() == ["keyboard-us", "chewing"], state_lines
     close_stdin()
   step(1.0, single_method_settled)
 
+os.environ.pop("FCITX_CONFIG_HOME", None)
 with patch.dict(os.environ, {"XDG_CONFIG_HOME": config_home}), \
      patch.object(indicator, "snapshot", side_effect=snapshot), \
      patch.object(indicator, "call", side_effect=lambda bus, method, args=None: (list(groups),) if method == "InputMethodGroups" else (_ for _ in ()).throw(AssertionError(method))), \
@@ -319,6 +333,12 @@ assert not errors, errors
 print("ok - one input method is read once and again on a profile save, and several are polled for switches")
 print("ok - an event during polling replaces the poll, and a failed read is retried")
 print("ok - relinking the Fcitx directory or the profile moves the watch, and replaced saves are seen")
+
+with patch.dict(os.environ, {"XDG_CONFIG_HOME": "/xdg", "FCITX_CONFIG_HOME": "/fcitx"}):
+  assert indicator.profile_path() == "/fcitx/profile"
+  del os.environ["FCITX_CONFIG_HOME"]
+  assert indicator.profile_path() == "/xdg/fcitx5/profile"
+print("ok - the watched profile follows Fcitx's FCITX_CONFIG_HOME override")
 
 groups.append("Second")
 with patch.object(indicator, "call", return_value=(groups,)):

@@ -134,14 +134,24 @@ class Indicator:
     return len(methods) > 1 or len(call(self.bus, "InputMethodGroups")[0]) > 1
 
 
-def config_home():
-  return os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+def profile_path():
+  # Fcitx's own lookup: FCITX_CONFIG_HOME, else $XDG_CONFIG_HOME/fcitx5.
+  directory = os.environ.get("FCITX_CONFIG_HOME") or os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "fcitx5")
+  return os.path.join(directory, "profile")
 
 
-def profile_paths():
-  profile = os.path.join(config_home(), "fcitx5", "profile")
-  # A dotfile manager may link the profile elsewhere; follow both ends.
-  return list(dict.fromkeys([profile, os.path.realpath(profile)]))
+def watched_entries():
+  # Saves rename a new profile into place, and a dotfile manager may link the
+  # profile or its directory elsewhere, or replace a linked directory. Watch the
+  # profile's directory and that directory's parent, along both the path as
+  # written and the path it resolves to, for the one entry each level holds.
+  entries = []
+  for path in dict.fromkeys([profile_path(), os.path.realpath(profile_path())]):
+    directory = os.path.dirname(path)
+    entries += [(directory, os.path.basename(path)),
+                (os.path.dirname(directory), os.path.basename(directory))]
+  return list(dict.fromkeys(entries))
 
 
 class ProfileWatch:
@@ -150,29 +160,23 @@ class ProfileWatch:
   def __init__(self, changed):
     self.changed = changed
     self.monitors = []
-    # Re-resolve when ~/.config/fcitx5 itself is replaced or relinked, which
-    # the monitors on the old target would never see.
-    self.parent = Gio.File.new_for_path(config_home()).monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
-    self.parent.connect("changed", self.parent_changed)
     self.bind()
 
   def bind(self):
     for monitor in self.monitors:
       monitor.cancel()
     self.monitors = []
-    for path in profile_paths():
-      monitor = Gio.File.new_for_path(path).monitor_file(Gio.FileMonitorFlags.WATCH_MOVES, None)
-      monitor.connect("changed", self.profile_changed)
+    for directory, name in watched_entries():
+      monitor = Gio.File.new_for_path(directory).monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
+      monitor.connect("changed", self.entry_changed, name)
       self.monitors.append(monitor)
 
-  def profile_changed(self, *_):
-    # A relinked profile points somewhere new.
+  def entry_changed(self, monitor, file, other, event, name):
+    if name not in (file.get_basename(), other.get_basename() if other else None):
+      return
+    # A relinked or replaced entry may resolve somewhere new.
     self.bind()
     self.changed()
-
-  def parent_changed(self, monitor, file, other, event):
-    if "fcitx5" in (file.get_basename(), other.get_basename() if other else None):
-      self.profile_changed()
 
 
 def follow(bus, changed, presence):
