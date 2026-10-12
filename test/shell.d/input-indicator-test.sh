@@ -181,12 +181,16 @@ import tempfile
 config_home = tempfile.mkdtemp()
 os.makedirs(config_home + "/first")
 os.makedirs(config_home + "/second")
+os.makedirs(config_home + "/third")
 # A dotfile manager's layout: the Fcitx directory is a link into the dotfiles.
 os.symlink("first", config_home + "/fcitx5")
 
-def save(directory="first"):
-  with open(f"{config_home}/{directory}/profile", "w") as file:
+# Saved the way Fcitx and configure.py save it: a new file renamed over the old.
+def save(directory="first", name="profile"):
+  path = f"{config_home}/{directory}/{name}"
+  with open(path + ".tmp", "w") as file:
     file.write("[Groups/0]\nName=Default\n# " + ",".join(live["methods"]) + "\n")
+  os.replace(path + ".tmp", path)
 
 live = {"methods": ["keyboard-us"], "current": "keyboard-us", "name": "English", "label": "en", "language": "en"}
 save()
@@ -285,6 +289,19 @@ def scenario():
     step(0.6, saved_in_new_target)
   def saved_in_new_target():
     assert methods() == ["keyboard-us", "hangul"], state_lines
+    # A profile that is itself a link is watched at its target too.
+    live["methods"] = ["keyboard-us"]
+    save("third", "profile.real")
+    os.symlink("../third/profile.real", config_home + "/second/profile.new")
+    os.replace(config_home + "/second/profile.new", config_home + "/second/profile")
+    step(0.6, linked_profile)
+  def linked_profile():
+    assert methods() == ["keyboard-us"], state_lines
+    live["methods"] = ["keyboard-us", "pinyin"]
+    save("third", "profile.real")
+    step(0.6, saved_through_link)
+  def saved_through_link():
+    assert methods() == ["keyboard-us", "pinyin"], state_lines
     close_stdin()
   step(1.0, single_method_settled)
 
@@ -301,7 +318,7 @@ with patch.dict(os.environ, {"XDG_CONFIG_HOME": config_home}), \
 assert not errors, errors
 print("ok - one input method is read once and again on a profile save, and several are polled for switches")
 print("ok - an event during polling replaces the poll, and a failed read is retried")
-print("ok - relinking the Fcitx configuration directory moves the profile watch")
+print("ok - relinking the Fcitx directory or the profile moves the watch, and replaced saves are seen")
 
 groups.append("Second")
 with patch.object(indicator, "call", return_value=(groups,)):
