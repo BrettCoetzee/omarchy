@@ -161,9 +161,12 @@ def profile_path(owner=None):
   # path is relative to the working directory.
   environment, cwd = owner or (os.environ, os.getcwd())
   home = environment.get("HOME") or os.path.expanduser("~")
-  directory = environment.get("FCITX_CONFIG_HOME") or os.path.join(
-    environment.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"), "fcitx5")
-  return os.path.join(os.path.normpath(os.path.join(cwd, directory)), "profile")
+  if environment.get("FCITX_CONFIG_HOME"):
+    directory = os.path.join(cwd, environment["FCITX_CONFIG_HOME"])
+  else:
+    # A relative XDG_CONFIG_HOME is relative to the home directory.
+    directory = os.path.join(home, environment.get("XDG_CONFIG_HOME") or ".config", "fcitx5")
+  return os.path.join(os.path.normpath(directory), "profile")
 
 
 def watched_entries(owner=None, hops=40):
@@ -192,7 +195,8 @@ def watched_entries(owner=None, hops=40):
     # save, and so does a real directory above the profile's own: watching the
     # busy home directory for those would wake on every file written there.
     toward_home = candidate == home or home.startswith(candidate + "/")
-    settled = target is None and os.path.isdir(candidate) and len(pending) > 1
+    remaining = [item for item in pending if item not in ("", ".")]
+    settled = target is None and os.path.isdir(candidate) and len(remaining) > 1
     if not toward_home and not settled:
       entries.append((current, part))
     if target is not None:

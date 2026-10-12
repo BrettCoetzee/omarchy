@@ -398,6 +398,10 @@ with patch.dict(os.environ, {"XDG_CONFIG_HOME": "/xdg", "FCITX_CONFIG_HOME": "/f
   assert indicator.profile_path() == "/fcitx/cleaned/profile"
   os.environ["FCITX_CONFIG_HOME"] = "relative/fcitx"
   assert indicator.profile_path() == os.path.join(os.getcwd(), "relative/fcitx/profile")
+  # Without it, a relative XDG_CONFIG_HOME is relative to the home directory.
+  del os.environ["FCITX_CONFIG_HOME"]
+  os.environ.update(XDG_CONFIG_HOME="relative/config", HOME="/somewhere")
+  assert indicator.profile_path() == "/somewhere/relative/config/fcitx5/profile", indicator.profile_path()
 print("ok - the watched profile follows Fcitx's FCITX_CONFIG_HOME override, cleaned the way Fcitx cleans it")
 
 # A link that vanishes mid-resolution, as a relink in progress makes it, is
@@ -451,6 +455,14 @@ with patch.dict(os.environ, {"HOME": plain_root + "/home"}):
   os.environ.pop("FCITX_CONFIG_HOME", None)
   assert indicator.watched_entries() == [(plain_root + "/home/.config", "fcitx5"),
                                          (plain_root + "/home/.config/fcitx5", "profile")], indicator.watched_entries()
+
+# A link written with a trailing slash still leads to the profile's directory.
+slash_root = tempfile.mkdtemp()
+os.makedirs(slash_root + "/home/.config/first")
+os.symlink("first/.", slash_root + "/home/.config/fcitx5")
+with patch.dict(os.environ, {"HOME": slash_root + "/home"}):
+  os.environ.pop("XDG_CONFIG_HOME", None)
+  assert (slash_root + "/home/.config", "first") in indicator.watched_entries(), indicator.watched_entries()
 
 # The path changing while the watches are armed is resolved again.
 armed = []
