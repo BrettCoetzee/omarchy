@@ -137,24 +137,45 @@ class Indicator:
     return len(call(self.bus, "InputMethodGroups")[0]) > 1
 
 
-def profile_path():
+def owner_environment(bus):
+  """The environment and working directory of the process that owns Fcitx's bus name.
+
+  The profile is wherever that process saves it, which a service drop-in can
+  move without the shell's own environment knowing.
+  """
+  try:
+    pid = bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                        "GetConnectionUnixProcessID", GLib.Variant("(s)", (BUS,)), None,
+                        Gio.DBusCallFlags.NONE, 1000, None).unpack()[0]
+    with open(f"/proc/{pid}/environ", "rb") as file:
+      items = file.read().decode(errors="replace").split("\0")
+    environment = dict(item.split("=", 1) for item in items if "=" in item)
+    return environment, os.readlink(f"/proc/{pid}/cwd")
+  except (GLib.Error, OSError, ValueError):
+    return None
+
+
+def profile_path(owner=None):
   # Fcitx's own lookup: FCITX_CONFIG_HOME, else $XDG_CONFIG_HOME/fcitx5, cleaned
   # lexically the way Fcitx cleans it before any link is followed. A relative
   # path is relative to the working directory.
-  directory = os.environ.get("FCITX_CONFIG_HOME") or os.path.join(
-    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "fcitx5")
-  return os.path.join(os.path.abspath(directory), "profile")
+  environment, cwd = owner or (os.environ, os.getcwd())
+  home = environment.get("HOME") or os.path.expanduser("~")
+  directory = environment.get("FCITX_CONFIG_HOME") or os.path.join(
+    environment.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"), "fcitx5")
+  return os.path.join(os.path.normpath(os.path.join(cwd, directory)), "profile")
 
 
-def watched_entries(hops=40):
+def watched_entries(owner=None, hops=40):
   # Saves rename a new profile into place, and a dotfile manager may link the
   # profile, its directory or the configuration home elsewhere, chain links, or
   # replace a linked directory. Resolve the path the way the kernel does, one
   # component at a time, and watch each directory it passes through for the one
-  # entry it looks up there, from the home directory down.
-  home = os.path.realpath(os.path.expanduser("~"))
+  # entry it looks up there when that entry is a link, is missing, or is the
+  # profile or its directory.
+  home = os.path.realpath((owner[0] if owner else os.environ).get("HOME") or os.path.expanduser("~"))
   entries = []
-  current, pending = "/", profile_path().split("/")
+  current, pending = "/", profile_path(owner).split("/")
   while pending:
     part = pending.pop(0)
     if part in ("", "."):
@@ -163,13 +184,17 @@ def watched_entries(hops=40):
       current = os.path.dirname(current)
       continue
     candidate = os.path.join(current, part)
-    # The way down to the home directory changes with a new session, not a save.
-    if candidate != home and not home.startswith(candidate + "/"):
-      entries.append((current, part))
     try:
       target = os.readlink(candidate) if hops > 0 else None
     except OSError:
       target = None
+    # The way down to the home directory changes with a new session, not a
+    # save, and so does a real directory above the profile's own: watching the
+    # busy home directory for those would wake on every file written there.
+    toward_home = candidate == home or home.startswith(candidate + "/")
+    settled = target is None and os.path.isdir(candidate) and len(pending) > 1
+    if not toward_home and not settled:
+      entries.append((current, part))
     if target is not None:
       hops -= 1
       if target.startswith("/"):
@@ -189,12 +214,13 @@ class ProfileWatch:
   def __init__(self, changed):
     self.changed = changed
     self.monitors = []
+    self.owner = None
     self.bind()
 
   def bind(self):
     # Resolve before dropping the old watches, so a failure keeps them, and
     # again once the new ones are armed, in case the path changed in between.
-    entries = watched_entries()
+    entries = watched_entries(self.owner)
     for _ in range(10):
       for monitor in self.monitors:
         monitor.cancel()
@@ -203,7 +229,7 @@ class ProfileWatch:
         monitor = Gio.File.new_for_path(directory).monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
         monitor.connect("changed", self.entry_changed, name)
         self.monitors.append(monitor)
-      armed, entries = entries, watched_entries()
+      armed, entries = entries, watched_entries(self.owner)
       if entries == armed:
         return
     # Still moving: whoever is changing it will send another event.
@@ -221,12 +247,17 @@ def follow(bus, changed, presence):
   # (Controller1's InputMethodGroupsChanged stays silent for group edits and
   # switches alike), so follow the service's bus name for restarts and the
   # profile it saves every configuration change to.
+  profile = ProfileWatch(changed)
+
   def owner(present):
     presence(present)
+    if present:
+      profile.owner = owner_environment(bus)
+      profile.bind()
     changed()
   name = Gio.bus_watch_name_on_connection(bus, BUS, Gio.BusNameWatcherFlags.NONE,
                                           lambda *_: owner(True), lambda *_: owner(False))
-  return [name, ProfileWatch(changed)]
+  return [name, profile]
 
 
 def watch(bus):

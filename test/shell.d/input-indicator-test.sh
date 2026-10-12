@@ -442,6 +442,16 @@ os.makedirs(beside_root + "/home")
 with patch.dict(os.environ, {"HOME": beside_root + "/home", "FCITX_CONFIG_HOME": beside_root + "/fcitx5"}):
   assert indicator.watched_entries() == [(beside_root, "fcitx5")], indicator.watched_entries()
 
+# A plain ~/.config is not watched from the busy home directory: only the
+# profile and its directory can change with a save.
+plain_root = tempfile.mkdtemp()
+os.makedirs(plain_root + "/home/.config/fcitx5")
+with patch.dict(os.environ, {"HOME": plain_root + "/home"}):
+  os.environ.pop("XDG_CONFIG_HOME", None)
+  os.environ.pop("FCITX_CONFIG_HOME", None)
+  assert indicator.watched_entries() == [(plain_root + "/home/.config", "fcitx5"),
+                                         (plain_root + "/home/.config/fcitx5", "profile")], indicator.watched_entries()
+
 # The path changing while the watches are armed is resolved again.
 armed = []
 real_new_for_path = indicator.Gio.File.new_for_path
@@ -454,6 +464,33 @@ with patch.object(indicator, "watched_entries", side_effect=[early, late, late])
   indicator.ProfileWatch(lambda: None)
 assert armed == [fresh_root, fresh_root + "/config"], armed
 print("ok - a missing configuration is watched until it exists, and a vanishing link keeps its watch")
+
+# The profile is the one the Fcitx process saves, whose environment a service
+# drop-in can set without the shell knowing.
+daemon_dir = tempfile.mkdtemp()
+os.makedirs(daemon_dir + "/relative/fcitx")
+daemon = subprocess.Popen(["sleep", "30"], cwd=daemon_dir,
+                          env={"HOME": daemon_dir, "FCITX_CONFIG_HOME": "relative/fcitx"})
+class OwnerBus:
+  def call_sync(self, name, path, interface, method, args, *rest):
+    assert method == "GetConnectionUnixProcessID" and args.unpack() == (indicator.BUS,)
+    return indicator.GLib.Variant("(u)", (daemon.pid,))
+try:
+  owner = indicator.owner_environment(OwnerBus())
+  assert indicator.profile_path(owner) == daemon_dir + "/relative/fcitx/profile", indicator.profile_path(owner)
+  appeared, armed = {}, []
+  def watch_name(bus, name, flags, on_appeared, on_vanished):
+    appeared["callback"] = on_appeared
+    return 1
+  with patch.object(indicator.Gio, "bus_watch_name_on_connection", side_effect=watch_name), \
+       patch.object(indicator.Gio.File, "new_for_path", side_effect=recording_new_for_path):
+    indicator.follow(OwnerBus(), lambda: None, lambda present: None)
+    armed.clear()
+    appeared["callback"]()
+  assert armed[-1] == daemon_dir + "/relative/fcitx", armed
+finally:
+  daemon.kill()
+print("ok - the watch follows the profile of the process that owns Fcitx's bus name")
 
 groups.append("Second")
 with patch.object(indicator, "call", return_value=(groups,)):
