@@ -144,15 +144,33 @@ def profile_path():
   return os.path.join(directory, "profile")
 
 
+def resolution(path, hops=40):
+  """The path as written, then as it reads after each symlink on the way."""
+  paths = [path]
+  for _ in range(hops):
+    prefix, parts = "/", path.strip("/").split("/")
+    for index, part in enumerate(parts):
+      candidate = os.path.join(prefix, part)
+      if os.path.islink(candidate):
+        # The prefix holds no links, so the target's ".." resolves lexically.
+        path = os.path.normpath(os.path.join(prefix, os.readlink(candidate), *parts[index + 1:]))
+        paths.append(path)
+        break
+      prefix = candidate
+    else:
+      break
+  return paths
+
+
 def watched_entries():
   # Saves rename a new profile into place, and a dotfile manager may link the
-  # profile, its directory or the configuration home elsewhere, or replace a
-  # linked directory. Watch each directory on the way to the profile for the
-  # one entry it holds, along the path as written and the path it resolves to,
-  # up to the home directory.
+  # profile, its directory or the configuration home elsewhere, chain links, or
+  # replace a linked directory. Watch each directory the lookup passes through
+  # for the one entry it holds, along every hop of the resolution, up to the
+  # home directory.
   home = os.path.realpath(os.path.expanduser("~"))
   entries = []
-  for path in dict.fromkeys([profile_path(), os.path.realpath(profile_path())]):
+  for path in resolution(profile_path()):
     directory, name = os.path.split(path)
     while name:
       entries.append((directory, name))

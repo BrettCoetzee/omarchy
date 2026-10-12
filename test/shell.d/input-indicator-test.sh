@@ -333,6 +333,24 @@ def scenario():
     step(0.6, saved_in_new_home)
   def saved_in_new_home():
     assert methods() == ["keyboard-us", "anthy"], state_lines
+    # A chain of links: profile -> store/current -> store/profile-a.
+    live["methods"] = ["keyboard-us"]
+    os.makedirs(config_home + "/store")
+    save("store", "profile-a")
+    os.symlink("profile-a", config_home + "/store/current")
+    os.symlink("../store/current", config_home + "/fcitx5/profile.new")
+    os.replace(config_home + "/fcitx5/profile.new", config_home + "/fcitx5/profile")
+    step(0.6, chained)
+  def chained():
+    assert methods() == ["keyboard-us"], state_lines
+    # Repointing the middle link is seen, though neither end changed.
+    live["methods"] = ["keyboard-us", "rime"]
+    save("store", "profile-b")
+    os.symlink("profile-b", config_home + "/store/current.new")
+    os.replace(config_home + "/store/current.new", config_home + "/store/current")
+    step(0.6, middle_relinked)
+  def middle_relinked():
+    assert methods() == ["keyboard-us", "rime"], state_lines
     close_stdin()
   step(1.0, single_method_settled)
 
