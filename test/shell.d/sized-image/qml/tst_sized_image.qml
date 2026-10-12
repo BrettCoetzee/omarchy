@@ -44,6 +44,14 @@ Item {
     url: root.narrowImage
   }
 
+  // A 400x10 SVG strip.
+  SizedImage {
+    id: vector
+    width: 100
+    height: 100
+    url: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MDAiIGhlaWdodD0iMTAiPjxyZWN0IHdpZHRoPSI0MDAiIGhlaWdodD0iMTAiIGZpbGw9InJlZCIvPjwvc3ZnPg=="
+  }
+
   SizedImage {
     id: unsized
     width: 0
@@ -80,6 +88,30 @@ Item {
       compare(rect.width, 400, "it is still drawn to fit the box")
       compare(rect.height, 10)
       compare(rect.y, 0, "at the top it was aligned to")
+    }
+
+    // Without a preserving fill mode Qt would render it at exactly sourceSize,
+    // a 100x100 square, and PreserveAspectFit would render it at 4000x100.
+    function test_an_svg_keeps_its_shape_and_its_own_size() {
+      tryCompare(vector, "status", Image.Ready)
+      var image = vector.children[0]
+      compare(bitmap(vector).width, 400, "rendered at its intrinsic width")
+      compare(bitmap(vector).height, 10, "and height")
+      compare(image.paintedWidth, 100, "drawn across the box")
+      compare(image.paintedHeight, 2.5, "without losing its aspect ratio")
+    }
+
+    function test_clipboard_svg_captures_count_as_svgs() {
+      var probe = Qt.createQmlObject('import "../../../../shell/Ui"; SizedImage {}', root)
+      probe.url = "file:///state/clipboard-images/abc.svg+xml"
+      verify(probe.scalable, "a capture named after image/svg+xml")
+      probe.url = "file:///state/clipboard-images/abc.svg"
+      verify(probe.scalable, "a plain .svg")
+      probe.url = "file:///state/clipboard-images/abc.png"
+      verify(!probe.scalable, "a raster capture")
+      probe.url = "file:///home/me/svg/shot.png"
+      verify(!probe.scalable, "a raster file under a directory named svg")
+      probe.destroy()
     }
 
     function test_it_waits_for_a_size_before_decoding() {
