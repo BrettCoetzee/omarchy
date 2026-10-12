@@ -37,6 +37,7 @@ Item {
   property bool pendingStayAwakePersist: false
   property bool idledThisCycle: false
   property bool screensaverStartedThisCycle: false
+  property bool blankedOnBattery: false
   property string lastEvent: "starting"
   property string lastEventAt: ""
   property var screensaverWindows: ({})
@@ -75,20 +76,37 @@ Item {
   }
 
   function runScreensaverStage() {
-    if (!UPower.onBattery || !root.lockEnabled) {
+    // On AC omarchy-launch-screensaver reads the toggle itself.
+    if (!UPower.onBattery) {
       launchScreensaver()
       return
     }
-    // Read the screensaver toggle (omarchy-toggle-enabled screensaver-off)
-    // before locking in its place.
     if (!screensaverOffProbe.running) screensaverOffProbe.running = true
   }
 
   function finishBatteryScreensaverStage(screensaverOff) {
     if (!root.idleEnabled || !root.idledThisCycle) return
-    if (IdleModel.screensaverStageLocks(UPower.onBattery, root.lockEnabled, screensaverOff)) lockSystem("screensaver-on-battery")
-    else if (!screensaverOff) launchScreensaver()
+    var action = IdleModel.screensaverStageAction(UPower.onBattery, screensaverOff)
+    if (action === "blank") blankOnBattery("screensaver-on-battery")
+    else if (action === "screensaver") launchScreensaver()
     else logEvent("screensaver-stage-skipped", "screensaver off")
+  }
+
+  // Blank the displays the way the lock does, leaving the lock to its own
+  // deadline. Activity ends the cycle, and omarchy-system-wake turns them on.
+  function blankOnBattery(reason) {
+    root.blankedOnBattery = true
+    logEvent("battery-blank", reason)
+    runProcess(blankProcess, "battery-blank", "omarchy-brightness-keyboard off; omarchy-brightness-display off")
+  }
+
+  // Unplugged while the screensaver runs: close it and blank instead. Its
+  // windows closing is not the user dismissing it.
+  function handlePowerSourceChanged() {
+    if (!UPower.onBattery || !root.idledThisCycle || root.blankedOnBattery) return
+    if (!root.screensaverStartedThisCycle || root.screensaverWindowCount === 0) return
+    blankOnBattery("unplugged-during-screensaver")
+    runProcess(screensaverStopProcess, "screensaver-stop", "pkill -TERM -f '[b]in/omarchy-screensaver$'")
   }
 
   function lockSystem(reason) {
@@ -98,6 +116,7 @@ Item {
     screensaverLaunchGraceTimer.stop()
     root.idledThisCycle = false
     root.screensaverStartedThisCycle = false
+    root.blankedOnBattery = false
     resetScreensaverWindows()
     runProcess(lockProcess, "lock", "omarchy-system-lock")
   }
@@ -111,6 +130,7 @@ Item {
     logEvent("idle-cycle-start", "screensaver=" + root.screensaverTimeoutSeconds + " lock=" + root.lockTimeoutSeconds)
     root.idledThisCycle = true
     root.screensaverStartedThisCycle = false
+    root.blankedOnBattery = false
     resetScreensaverWindows()
 
     // Set this cycle's deadlines once: a bound interval would restart a pending
@@ -142,6 +162,7 @@ Item {
 
     root.idledThisCycle = false
     root.screensaverStartedThisCycle = false
+    root.blankedOnBattery = false
     resetScreensaverWindows()
   }
 
@@ -165,7 +186,7 @@ Item {
     setScreensaverWindow(address, false)
 
     if (!root.idleEnabled || !root.idledThisCycle || !root.screensaverStartedThisCycle) return
-    if (root.screensaverWindowCount > 0) return
+    if (root.screensaverWindowCount > 0 || root.blankedOnBattery) return
 
     // The user dismissed the screensaver before the lock deadline. Treat that
     // as activity and cancel the pending lock; the lock timer is only allowed
@@ -221,6 +242,7 @@ Item {
       idle: idleMonitor.isIdle,
       inIdleCycle: root.idledThisCycle,
       screensaverStarted: root.screensaverStartedThisCycle,
+      blankedOnBattery: root.blankedOnBattery,
       screensaver: root.screensaverTimeoutSeconds,
       lock: root.lockTimeoutSeconds,
       screensaverDelay: root.screensaverDelaySeconds,
@@ -323,8 +345,22 @@ Item {
 
   Process {
     id: screensaverOffProbe
-    command: ["bash", "-c", "[[ -f $HOME/.local/state/omarchy/toggles/screensaver-off ]]"]
+    command: ["omarchy-toggle-enabled", "screensaver-off"]
     onExited: function(exitCode) { root.finishBatteryScreensaverStage(exitCode === 0) }
+  }
+
+  Process {
+    id: blankProcess
+    onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "battery-blank exitCode=" + exitCode + " status=" + exitStatus) }
+  }
+
+  Process {
+    id: screensaverStopProcess
+  }
+
+  Connections {
+    target: UPower
+    function onOnBatteryChanged() { root.handlePowerSourceChanged() }
   }
 
   Process {

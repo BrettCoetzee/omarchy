@@ -24,13 +24,13 @@ function delayAfterFirstIdle(timeoutSeconds, firstIdleSeconds) {
   return delay > 0 ? delay : 0
 }
 
-// The screensaver keeps the panel lit at full brightness until the lock blanks
-// it. On battery, the screensaver deadline locks instead, and the lock blanks
-// the displays seconds later. Without a lock stage there is nothing to go to,
-// so the screensaver runs as it does on AC. A screensaver turned off leaves
-// the stage empty, so the lock keeps its own deadline.
-function screensaverStageLocks(onBattery, lockEnabled, screensaverOff) {
-  return !!onBattery && !!lockEnabled && !screensaverOff
+// What the screensaver deadline does. The screensaver keeps the panel lit at
+// full brightness until the lock blanks it, so on battery the displays are
+// blanked instead, and the lock keeps its own deadline. A screensaver turned
+// off leaves the stage empty either way.
+function screensaverStageAction(onBattery, screensaverOff) {
+  if (screensaverOff) return "none"
+  return onBattery ? "blank" : "screensaver"
 }
 
 function eventParts(event, count) {
@@ -77,7 +77,7 @@ if (typeof module !== "undefined") {
     secondsFromConfig: secondsFromConfig,
     firstIdleTimeout: firstIdleTimeout,
     delayAfterFirstIdle: delayAfterFirstIdle,
-    screensaverStageLocks: screensaverStageLocks,
+    screensaverStageAction: screensaverStageAction,
     eventParts: eventParts,
     screensaverWindowsAfter: screensaverWindowsAfter
   }

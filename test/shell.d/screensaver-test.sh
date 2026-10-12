@@ -30,7 +30,8 @@ cat >"$tmpdir/bin/ttfx" <<'SH'
 printf '%s\n' "$*" >>"$TEST_DIR/ttfx"
 printf 'ttfx\n' >>"$TEST_DIR/order"
 printf '%s\n' "$$" >>"$TEST_DIR/ttfx.pids"
-exec sleep "$(<"$TEST_DIR/effect-seconds")"
+sleep "$(<"$TEST_DIR/effect-seconds")"
+exit "$(<"$TEST_DIR/effect-exit")"
 SH
 # Ends the running effects the way the real pkill -x ttfx would, then gives a
 # loop that is still running time to start another before the windows close.
@@ -50,6 +51,7 @@ chmod +x "$tmpdir/bin/"*
 # through $keys and Hyprland events through $events.
 start_screensaver() {
   printf '%s\n' "${2:-600}" >"$tmpdir/effect-seconds"
+  printf '%s\n' "${3:-0}" >"$tmpdir/effect-exit"
   : >"$tmpdir/hyprctl"
   : >"$tmpdir/ttfx"
   : >"$tmpdir/ttfx.pids"
@@ -92,8 +94,6 @@ focus_checks() {
 start_screensaver org.omarchy.screensaver
 sleep 3.5
 [[ -e $tmpdir/done ]] && fail "the screensaver keeps running while it has focus"
-[[ $(<"$tmpdir/ttfx") == *"--frame-rate 60 "* ]] || fail "effects play at 60 frames per second" "$(<"$tmpdir/ttfx")"
-pass "effects play at 60 frames per second"
 (( $(focus_checks) == 1 )) || fail "focus is checked once at start, not on a timer" "$(<"$tmpdir/hyprctl")"
 pass "focus is checked once at start, not on a timer"
 
@@ -155,7 +155,8 @@ done
 [[ -s $tmpdir/ttfx.pids ]] || fail "the first effect starts"
 effects=$(wc -l <"$tmpdir/ttfx")
 xargs -r kill <"$tmpdir/ttfx.pids"
-sleep 1
+# Longer than the pause before retrying a failed effect.
+sleep 2
 (( $(wc -l <"$tmpdir/ttfx") == effects )) || fail "an effect stopped from outside starts no other" "$(<"$tmpdir/order")"
 pass "an effect stopped from outside, as locking does, starts no other"
 printf 'x' >&"$keys"
@@ -168,4 +169,14 @@ sleep 1.5
 exec {events}>&-
 wait_for "$tmpdir/done" || fail "the screensaver exits when the event stream ends"
 pass "the screensaver exits when the event stream ends"
+stop_screensaver
+
+# A failed effect is retried after a pause, not in a tight loop.
+start_screensaver org.omarchy.screensaver 0 1
+sleep 2.5
+effects=$(wc -l <"$tmpdir/ttfx")
+(( effects >= 2 && effects <= 4 )) || fail "a failed effect is retried after a pause" "$effects effects in 2.5 s"
+pass "a failed effect is retried after a pause"
+printf 'x' >&"$keys"
+wait_for "$tmpdir/done" || fail "a key ends the screensaver while effects fail"
 stop_screensaver

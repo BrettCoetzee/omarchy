@@ -81,13 +81,15 @@ Both numbers are seconds counted from the moment you went idle — not from each
 
 If you dismiss the screensaver before the lock deadline, that counts as activity and the pending lock is cancelled. You don't get locked out for glancing at your machine.
 
+On battery the screensaver doesn't run. At its deadline the displays turn off instead, which saves the backlight, and the lock still comes at its own time. Any key or mouse movement turns them back on and starts the idle timer over. If you unplug while the screensaver is up, it closes and the displays turn off. With the idle screensaver turned off, nothing happens at that point on battery either.
+
 To stop locking on idle entirely, `Super + Ctrl + I` — or `omarchy toggle idle` — flips stay awake on, and the coffee cup indicator appears in the bar. That's the one to hit before a long presentation or a build you want to watch. Hit it again to go back to normal. `omarchy toggle idle status` prints the current state as JSON if you need it from a script.
 
 This is about locking and the screensaver, not power. Suspend and hibernation have their own setup in [system sleep](36-system-sleep.md).
 
 ### The screensaver
 
-Omarchy's screensaver is ASCII art running through random text effects, one instance per monitor. Any key or mouse movement exits it.
+Omarchy's screensaver is ASCII art running through random text effects, one instance per monitor. Any key exits it, and so does focus moving to another window. Mouse movement alone does not.
 
 You can start it on demand from _System > Screensaver_ (`Super + Esc`), which forces it up even if you've turned the idle screensaver off. There's no hotkey bound to it by default.
 
