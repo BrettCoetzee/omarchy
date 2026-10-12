@@ -300,3 +300,13 @@ wait_for_detached_work
 ! grep -q 'Theme retint failed' "$home/.local/state/omarchy/theme-set.log" ||
   fail "a superseded batch's failure stays out of the newer switch's log" "$(cat "$home/.local/state/omarchy/theme-set.log")"
 pass "a superseded batch does not report failures against the newer theme"
+
+# A switch that cannot write its token still retints the other apps.
+rm -f "$test_tmp/release" "$state/theme.generation"
+touch "$test_tmp/release"
+mkdir "$state/theme.generation"
+OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
+wait_logged '^omarchy-theme-set-gnome$' "other apps retint when the switch token cannot be written"
+wait_for_detached_work
+rmdir "$state/theme.generation"
+pass "a switch whose token cannot be written still retints the other apps"

@@ -18,7 +18,7 @@ BACKGROUND_TRANSITION_CACHE="$HOME/.cache/omarchy/background-transitions"
 THEME_SET_LOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set.lock"
 THEME_SET_LOG="$HOME/.local/state/omarchy/theme-set.log"
 THEME_RETINT_LOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set-retint.lock"
-THEME_GENERATION_PATH="${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set.generation"
+THEME_GENERATION_PATH="$HOME/.local/state/omarchy/current/theme.generation"
 USER_THEMES_PATH="$HOME/.config/omarchy/themes"
 OMARCHY_THEMES_PATH="$OMARCHY_PATH/themes"
 
@@ -493,8 +493,12 @@ rm -rf "$CURRENT_THEME_PATH"
 mv "$NEXT_THEME_PATH" "$CURRENT_THEME_PATH"
 # Name this switch, so its deferred retints can tell when a later one replaced
 # the theme. A directory's inode would do, except that it can be reused.
+# A token that could not be written proves nothing either way, so then the
+# retints run as if this switch were the latest.
 APPLIED_THEME_GENERATION="$$-${EPOCHREALTIME//[!0-9]/}"
-printf '%s\n' "$APPLIED_THEME_GENERATION" 2>/dev/null >"$THEME_GENERATION_PATH"
+if ! printf '%s\n' "$APPLIED_THEME_GENERATION" 2>/dev/null >"$THEME_GENERATION_PATH"; then
+  APPLIED_THEME_GENERATION=""
+fi
 
 # Store theme name for reference
 echo "$THEME_NAME" >"$CURRENT_THEME_NAME_PATH"
@@ -548,6 +552,7 @@ other_theme_commands=(
 )
 
 theme_still_current() {
+  [[ -z $APPLIED_THEME_GENERATION ]] && return 0
   [[ $(<"$THEME_GENERATION_PATH") == "$APPLIED_THEME_GENERATION" ]] 2>/dev/null
 }
 
