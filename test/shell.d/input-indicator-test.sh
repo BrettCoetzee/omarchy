@@ -496,6 +496,11 @@ with patch.dict(os.environ, {"HOME": tree_root + "/home"}):
   assert replaced, "a save in the replacement tree is seen"
   context.pop_thread_default()
 
+# A profile kept directly in the home directory is still watched there.
+open(plain_root + "/home/profile", "w").close()
+with patch.dict(os.environ, {"HOME": plain_root + "/home", "FCITX_CONFIG_HOME": plain_root + "/home"}):
+  assert indicator.watched_entries() == [(plain_root + "/home", "profile")], indicator.watched_entries()
+
 # A link written with a trailing slash still leads to the profile's directory.
 slash_root = tempfile.mkdtemp()
 os.makedirs(slash_root + "/home/.config/first")

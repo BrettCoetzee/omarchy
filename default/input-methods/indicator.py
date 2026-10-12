@@ -177,7 +177,8 @@ def watched_entries(owner=None, hops=40):
   # directory it passes through below the home directory, for the entry it
   # looks up there and for the directory itself moving away. The home directory
   # and those above it are busy and change with a session rather than a save,
-  # so they are watched only for an entry that is a link or missing.
+  # so they are watched only for an entry that is a link, is missing, or is the
+  # profile itself.
   home = os.path.realpath((owner[0] if owner else os.environ).get("HOME") or os.path.expanduser("~"))
   entries = []
   current, pending = "/", profile_path(owner).split("/")
@@ -194,7 +195,8 @@ def watched_entries(owner=None, hops=40):
     except OSError:
       target = None
     above_home = current == home or home.startswith(current.rstrip("/") + "/")
-    if not above_home or target is not None or not os.path.lexists(candidate):
+    last = not [item for item in pending if item not in ("", ".")]
+    if not above_home or last or target is not None or not os.path.lexists(candidate):
       entries.append((current, part))
     if target is not None:
       hops -= 1
