@@ -560,6 +560,11 @@ apply_other_theme_commands() {
     wait_for_theme_intro themeIntroStatus "$THEME_INTRO_TOKEN" "pending"
   fi
 
+  # Warm the background selector's thumbnails, which converts images on every
+  # core, so it too waits for the reveal. The theme picker keeps its own rows
+  # in the shell and refreshes them each time it opens.
+  omarchy-theme-bg-cache </dev/null >/dev/null 2>&1 8>&- 9>&- &
+
   # Quick switches leave several of these batches going, and a retint such as
   # the browser's reads its colour long before it writes it. Run the batches
   # one at a time, and skip the retints of one whose theme was replaced while
@@ -618,8 +623,4 @@ if [[ $THEME_HEADLESS != "1" ]]; then
 
   # Mirror the theme to herdr machines. SSH can take a while, so this never holds up the theme change.
   setsid omarchy-theme-set-herdr-machines >>"$HOME/.local/state/omarchy/theme-set-herdr-machines.log" 2>&1 </dev/null &
-
-  # Warm the background selector's thumbnails. The theme picker keeps its own
-  # rows in the shell and refreshes them each time it opens.
-  omarchy-theme-bg-cache >/dev/null 2>&1 &
 fi

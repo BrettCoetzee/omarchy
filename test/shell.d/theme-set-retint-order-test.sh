@@ -67,10 +67,10 @@ cat >"$commands/noop" <<'STUB'
 exit 0
 STUB
 chmod +x "$commands/retint" "$commands/noop"
-for command in "$ROOT"/bin/omarchy-restart-* "$ROOT"/bin/omarchy-theme-set-* omarchy-hook; do
+for command in "$ROOT"/bin/omarchy-restart-* "$ROOT"/bin/omarchy-theme-set-* omarchy-hook omarchy-theme-bg-cache; do
   ln -sf retint "$commands/${command##*/}"
 done
-for command in omarchy-theme-set-templates omarchy-theme-bg-cache omarchy-theme-set-herdr-machines; do
+for command in omarchy-theme-set-templates omarchy-theme-set-herdr-machines; do
   ln -sf noop "$commands/$command"
 done
 cat >"$commands/omarchy-notification-send" <<'STUB'
@@ -149,9 +149,11 @@ for command in omarchy-restart-terminal omarchy-theme-set-foot omarchy-theme-set
   grep -qx "$command" "$log" || fail "$command retints before the switch returns, while the intro plays" "$(cat "$log")"
 done
 ! grep -qx 'omarchy-theme-set-gnome' "$log" || fail "other apps wait for the intro to finish its reveal"
+! grep -qx 'omarchy-theme-bg-cache' "$log" || fail "thumbnail warmup waits for the intro to finish its reveal"
 ! grep -qx 'omarchy-hook' "$log" || fail "the theme-set hook waits for the other retints"
 touch "$test_tmp/intro-done"
 wait_logged '^omarchy-theme-set-gnome$' "other apps retint once the intro has revealed"
+wait_logged '^omarchy-theme-bg-cache$' "thumbnail warmup starts once the intro has revealed"
 ! grep -qx 'omarchy-theme-set-browser' "$log" || fail "the held browser retint is still running"
 touch "$test_tmp/release"
 wait_logged '^omarchy-hook$' "the theme-set hook runs after the other retints"
