@@ -139,10 +139,11 @@ class Indicator:
 
 def profile_path():
   # Fcitx's own lookup: FCITX_CONFIG_HOME, else $XDG_CONFIG_HOME/fcitx5, cleaned
-  # lexically the way Fcitx cleans it before any link is followed.
+  # lexically the way Fcitx cleans it before any link is followed. A relative
+  # path is relative to the working directory.
   directory = os.environ.get("FCITX_CONFIG_HOME") or os.path.join(
     os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "fcitx5")
-  return os.path.join(os.path.normpath(directory), "profile")
+  return os.path.join(os.path.abspath(directory), "profile")
 
 
 def watched_entries(hops=40):

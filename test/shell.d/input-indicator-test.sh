@@ -396,6 +396,8 @@ with patch.dict(os.environ, {"XDG_CONFIG_HOME": "/xdg", "FCITX_CONFIG_HOME": "/f
   assert indicator.profile_path() == "/xdg/fcitx5/profile"
   os.environ["FCITX_CONFIG_HOME"] = "/fcitx/link/../cleaned"
   assert indicator.profile_path() == "/fcitx/cleaned/profile"
+  os.environ["FCITX_CONFIG_HOME"] = "relative/fcitx"
+  assert indicator.profile_path() == os.path.join(os.getcwd(), "relative/fcitx/profile")
 print("ok - the watched profile follows Fcitx's FCITX_CONFIG_HOME override, cleaned the way Fcitx cleans it")
 
 # A link that vanishes mid-resolution, as a relink in progress makes it, is
