@@ -122,16 +122,16 @@ Item {
     if (root.wakePending) requestWake()
   }
 
-  // Closes every screensaver, including the launcher still opening them on
-  // other monitors; a window that opens while this runs is closed by a rerun.
+  // Closes every screensaver. The launcher is left running, since it restores
+  // monitor focus once they have all closed; a window it opens after this is
+  // closed when it maps (handleScreensaverWindowOpened), or by a rerun.
   function stopScreensavers() {
     if (screensaverStopProcess.running) {
       root.stopPending = true
       return
     }
     root.stopPending = false
-    runProcess(screensaverStopProcess, "screensaver-stop",
-      "pkill -TERM -f '[b]in/omarchy-launch-screensaver'; pkill -TERM -f '[b]in/omarchy-screensaver$'")
+    runProcess(screensaverStopProcess, "screensaver-stop", "pkill -TERM -f '[b]in/omarchy-screensaver$'")
   }
 
   function handlePowerSourceChanged() {
