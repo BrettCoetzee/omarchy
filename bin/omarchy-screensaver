@@ -7,6 +7,8 @@ screensaver_in_focus() {
 }
 
 exit_screensaver() {
+  # Stop the effect loop first, so it can't start another effect in its place.
+  kill "$effects" "$focus_watch" "$events_pid" 2>/dev/null
   hyprctl eval 'hl.config({ cursor = { invisible = false } })' &>/dev/null || hyprctl keyword cursor:invisible false &>/dev/null || true
   pkill -x ttfx 2>/dev/null
   pkill -f '[o]rg.omarchy.screensaver' 2>/dev/null
@@ -20,8 +22,6 @@ printf '\033]11;rgb:00/00/00\007'  # Set background color to black
 
 hyprctl eval 'hl.config({ cursor = { invisible = true } })' &>/dev/null || hyprctl keyword cursor:invisible true &>/dev/null
 
-tty=$(tty 2>/dev/null)
-
 # Terminals allocate the pty at the default 80x24 and only resize it once the
 # compositor has told the window how big it is. ttfx measures the terminal once,
 # at startup, so starting it before the resize lands sizes an 80x24 canvas and
@@ -33,16 +33,39 @@ wait_for_terminal_resize() {
   done
 }
 
+# Open Hyprland's event stream before anything can move focus, so no change is missed.
+exec {events}< <(socat -U - "UNIX-CONNECT:$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket2.sock")
+events_pid=$!
+
 wait_for_terminal_resize
 
-while true; do
-  ttfx -i ~/.config/omarchy/branding/screensaver.txt \
-    --frame-rate 120 --canvas-width 0 --canvas-height 0 --reuse-canvas --anchor-canvas c --anchor-text c\
-    --random-effect --no-eol --no-restore-cursor &
-
-  while pgrep -t "${tty#/dev/}" -x ttfx >/dev/null; do
-    if read -n1 -t 1 || ! screensaver_in_focus; then
-      exit_screensaver
-    fi
+# One random effect after another until the screensaver ends. ttfx advances its
+# animation one step per frame, so the frame rate also sets the playback speed.
+# 60 matches the refresh of most panels; 120 rendered twice the frames a 60 Hz
+# panel can show.
+(
+  while true; do
+    ttfx -i ~/.config/omarchy/branding/screensaver.txt \
+      --frame-rate 60 --canvas-width 0 --canvas-height 0 --reuse-canvas --anchor-canvas c --anchor-text c \
+      --random-effect --no-eol --no-restore-cursor
   done
-done
+) &
+effects=$!
+
+# Leave once another window has focus. Focus passes through other monitors'
+# windows while the launcher opens one screensaver per monitor, so each change
+# away is confirmed a second later rather than acted on at once.
+(
+  sleep 1
+  screensaver_in_focus || kill -TERM $$
+  while IFS= read -r -u "$events" line; do
+    [[ $line == activewindow\>\>* && $line != activewindow\>\>org.omarchy.screensaver,* ]] || continue
+    sleep 1
+    screensaver_in_focus || kill -TERM $$
+  done
+) &
+focus_watch=$!
+
+# Any key ends it.
+read -n1
+exit_screensaver

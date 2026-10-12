@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
+import Quickshell.Services.UPower
 import Quickshell.Wayland
 import "IdleModel.js" as IdleModel
 import qs.Commons
@@ -73,6 +74,11 @@ Item {
     runProcess(screensaverProcess, "screensaver", "[[ $(omarchy-shell lock isLocked 2>/dev/null) == \"true\" ]] || omarchy-launch-screensaver")
   }
 
+  function runScreensaverStage() {
+    if (IdleModel.screensaverStageLocks(UPower.onBattery, root.lockEnabled)) lockSystem("screensaver-on-battery")
+    else launchScreensaver()
+  }
+
   function lockSystem(reason) {
     logEvent("lock-system", reason || "requested")
     screensaverTimer.stop()
@@ -98,7 +104,7 @@ Item {
     // Set this cycle's deadlines once: a bound interval would restart a pending
     // timer from the moment shell.json changes, locking early or late.
     if (root.screensaverEnabled) {
-      if (root.screensaverDelaySeconds === 0) launchScreensaver()
+      if (root.screensaverDelaySeconds === 0) runScreensaverStage()
       else {
         screensaverTimer.interval = root.screensaverDelaySeconds * 1000
         screensaverTimer.restart()
@@ -278,7 +284,7 @@ Item {
   Timer {
     id: screensaverTimer
     repeat: false
-    onTriggered: if (root.screensaverEnabled) root.launchScreensaver()
+    onTriggered: if (root.screensaverEnabled) root.runScreensaverStage()
   }
 
   Timer {

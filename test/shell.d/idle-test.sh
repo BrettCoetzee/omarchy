@@ -20,6 +20,10 @@ assertEqual(idle.firstIdleTimeout(0, 0), 0, 'idle has no first-idle timeout when
 assertEqual(idle.delayAfterFirstIdle(300, 150), 150, 'idle delays lock until its own timeout')
 assertEqual(idle.delayAfterFirstIdle(150, 150), 0, 'idle fires an action immediately when it is the first timeout')
 assertEqual(idle.delayAfterFirstIdle(0, 150), 0, 'idle does not schedule a disabled action')
+assertEqual(idle.screensaverStageLocks(true, true), true, 'idle locks at the screensaver deadline on battery')
+assertEqual(idle.screensaverStageLocks(false, true), false, 'idle shows the screensaver on AC')
+assertEqual(idle.screensaverStageLocks(true, false), false, 'idle shows the screensaver on battery when locking is off')
+assertEqual(idle.screensaverStageLocks(undefined, true), false, 'idle shows the screensaver when the power source is unknown')
 
 assert(
   serviceSource.includes('IdleModel.firstIdleTimeout(screensaverTimeoutSeconds, lockTimeoutSeconds)'),
@@ -34,7 +38,7 @@ assert(
   'idle does not lock immediately when lock timeout is disabled'
 )
 assert(
-  /id: screensaverTimer[\s\S]*?onTriggered: if \(root\.screensaverEnabled\) root\.launchScreensaver\(\)/.test(serviceSource),
+  /id: screensaverTimer[\s\S]*?onTriggered: if \(root\.screensaverEnabled\) root\.runScreensaverStage\(\)/.test(serviceSource),
   'idle does not launch a pending screensaver once its timeout is set to 0'
 )
 assert(
