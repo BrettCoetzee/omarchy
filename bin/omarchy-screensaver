@@ -63,6 +63,9 @@ effects=$!
     sleep 1
     screensaver_in_focus || kill -TERM $$
   done
+  # Without the event stream focus can't be followed, so leave rather than
+  # stay up unwatched, as a failed focus check always has.
+  kill -TERM $$
 ) &
 focus_watch=$!
 
