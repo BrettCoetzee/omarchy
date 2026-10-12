@@ -17,6 +17,7 @@ THEME_BACKGROUND_STATE_PATH="$HOME/.local/state/omarchy/theme-backgrounds"
 BACKGROUND_TRANSITION_CACHE="$HOME/.cache/omarchy/background-transitions"
 THEME_SET_LOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set.lock"
 THEME_SET_LOG="$HOME/.local/state/omarchy/theme-set.log"
+THEME_RETINT_LOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set-retint.lock"
 USER_THEMES_PATH="$HOME/.config/omarchy/themes"
 OMARCHY_THEMES_PATH="$OMARCHY_PATH/themes"
 
@@ -42,7 +43,7 @@ run_parallel() {
   local -a commands=("$@") pids=()
 
   for command in "${commands[@]}"; do
-    "$command" &
+    "$command" 8>&- &
     pids+=("$!")
   done
 
@@ -487,6 +488,7 @@ fi
 # Swap next theme in as current
 rm -rf "$CURRENT_THEME_PATH"
 mv "$NEXT_THEME_PATH" "$CURRENT_THEME_PATH"
+APPLIED_THEME_ID=$(stat -Lc '%d:%i' "$CURRENT_THEME_PATH")
 
 # Store theme name for reference
 echo "$THEME_NAME" >"$CURRENT_THEME_NAME_PATH"
@@ -547,12 +549,25 @@ apply_other_theme_commands() {
   if [[ -n $THEME_INTRO_TOKEN ]]; then
     wait_for_theme_intro themeIntroStatus "$THEME_INTRO_TOKEN" "pending"
   fi
-  run_parallel "${other_theme_commands[@]}"
+
+  # Quick switches leave several of these batches going, and a retint such as
+  # the browser's reads its colour long before it writes it. Run the batches
+  # one at a time, and skip the retints of one whose theme was replaced while
+  # it waited, so an older theme never lands after a newer one.
+  exec 8>"$THEME_RETINT_LOCK"
+  flock 8
+  if [[ $detached == "detached" ]]; then
+    exec 2>"$THEME_SET_LOG"
+  fi
+  if [[ $(stat -Lc '%d:%i' "$CURRENT_THEME_PATH" 2>/dev/null) == "$APPLIED_THEME_ID" ]]; then
+    run_parallel "${other_theme_commands[@]}"
+  fi
 
   # Call hook on theme set
-  omarchy-hook theme-set "$THEME_NAME" >/dev/null
+  omarchy-hook theme-set "$THEME_NAME" >/dev/null 8>&-
 
   report_failed_theme_commands "$detached"
+  exec 8>&-
 }
 
 if [[ $THEME_HEADLESS != "1" ]]; then
@@ -572,7 +587,7 @@ if [[ $THEME_HEADLESS != "1" ]]; then
     apply_other_theme_commands
   else
     mkdir -p "${THEME_SET_LOG%/*}"
-    apply_other_theme_commands detached </dev/null >/dev/null 2>"$THEME_SET_LOG" 9>&- &
+    apply_other_theme_commands detached </dev/null >/dev/null 2>/dev/null 9>&- &
   fi
 
   # Mirror the theme to herdr machines. SSH can take a while, so this never holds up the theme change.

@@ -22,16 +22,23 @@ cp -r "$themes/alpha" "$state/theme"
 printf 'alpha\n' >"$state/theme.name"
 ln -s "$state/theme/backgrounds/1-sky.webp" "$state/background"
 
-# Every retint logs its name. The browser one holds until released, standing
-# in for a slow policy write, and the VS Code one fails.
+# Every retint logs its name. The browser one reads the theme when it starts,
+# as the real one reads its colour, logs it when it finishes, and holds until
+# released, standing in for a slow policy write; with TEST_HOLD_THEME it holds
+# only once, for that theme. The VS Code one fails.
 cat >"$commands/retint" <<'STUB'
 #!/bin/bash
 name=${0##*/}
 if [[ $name == omarchy-theme-set-browser ]]; then
-  for attempt in {1..250}; do
-    [[ ! -f $TEST_TMP/release ]] || break
-    sleep 0.02
-  done
+  theme=$(<"$TEST_STATE/theme.name")
+  if [[ -z ${TEST_HOLD_THEME:-} || ($theme == "$TEST_HOLD_THEME" && ! -f $TEST_TMP/held) ]]; then
+    touch "$TEST_TMP/held"
+    for attempt in {1..250}; do
+      [[ ! -f $TEST_TMP/release ]] || break
+      sleep 0.02
+    done
+  fi
+  echo "browser-for $theme" >>"$TEST_LOG"
 fi
 echo "$name" >>"$TEST_LOG"
 [[ $name != omarchy-theme-set-vscode ]]
@@ -72,6 +79,10 @@ chmod +x "$commands/omarchy-notification-send" "$commands/hyprctl" "$commands/om
 
 set_theme() {
   : >"$log"
+  switch_theme "$@"
+}
+
+switch_theme() {
   HOME="$home" OMARCHY_PATH="$ROOT" PATH="$commands:$ROOT/bin:$PATH" XDG_RUNTIME_DIR="$test_tmp" \
     TEST_LOG="$log" TEST_TMP="$test_tmp" TEST_STATE="$state" \
     /bin/bash "$ROOT/bin/omarchy-theme-set" "$1" </dev/null >"$test_tmp/stdout" 2>"$test_tmp/stderr" ||
@@ -129,3 +140,28 @@ done
 grep -q 'Theme retint failed: omarchy-theme-set-vscode' "$test_tmp/stderr" || fail "a waited-for failure is named on stderr"
 ! grep -q '^notify: ' "$log" || fail "a waited-for failure is not also a notification"
 pass "OMARCHY_THEME_WAIT=1 waits for every retint and reports failures on stderr"
+
+# Alpha's browser retint is slow. Beta, picked meanwhile, must not finish first
+# and then be overwritten by alpha's late write.
+rm -f "$test_tmp/release" "$test_tmp/held"
+TEST_HOLD_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
+(sleep 0.3; touch "$test_tmp/release") &
+TEST_HOLD_THEME=alpha OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme beta
+wait
+wait_for_detached_work
+[[ $(grep '^browser-for ' "$log" | tr '\n' ' ') == "browser-for alpha browser-for beta " ]] ||
+  fail "an older switch's retints finish before a newer one's start" "$(cat "$log")"
+pass "retint batches from quick switches run in order"
+
+# Beta and then alpha are picked while alpha's first batch holds the retints.
+# Beta's batch finds its theme already replaced and leaves the apps alone.
+rm -f "$test_tmp/release" "$test_tmp/held"
+TEST_HOLD_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
+TEST_HOLD_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme beta
+TEST_HOLD_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme alpha
+touch "$test_tmp/release"
+wait_for_detached_work
+[[ $(grep '^browser-for ' "$log" | tr '\n' ' ') == "browser-for alpha browser-for alpha " ]] ||
+  fail "a batch whose theme was replaced while it waited skips its retints" "$(cat "$log")"
+(( $(grep -cx 'omarchy-hook' "$log") == 3 )) || fail "every switch still runs the theme-set hook" "$(cat "$log")"
+pass "a superseded retint batch leaves the apps to the newer theme"
