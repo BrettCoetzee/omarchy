@@ -66,6 +66,7 @@ grep -qxF "Exec=omarchy-cmd-browser-open testium %U" "$shadow" ||
 grep -qxF "Exec=omarchy-cmd-browser-open testium --incognito" "$shadow" ||
   fail "handoff routes the browser's actions through the opener"
 ! grep -q "^DBusActivatable=" "$shadow" || fail "handoff drops D-Bus activation, which would bypass Exec"
+[[ -z $(find "$applications" -name '.*') ]] || fail "handoff leaves no temporary files behind"
 pass "handoff shadows the default browser with an entry that goes through the opener"
 
 [[ $(omarchy-cmd-default-browser) == "chromium.desktop" ]] ||
@@ -92,6 +93,25 @@ omarchy-refresh-browser-handoff
 grep -qxF "Exec=firefox --my-profile %u" "$applications/firefox.desktop" ||
   fail "handoff leaves a user's own browser entry alone"
 pass "handoff leaves a user's own browser entry alone"
+
+# Fail the copy halfway through, as a full disk would.
+cat >"$mock_bin/sed" <<'SH'
+#!/bin/bash
+if [[ $* == *DBusActivatable* ]]; then
+  echo "[Desktop Entry]"
+  exit 1
+fi
+exec /usr/bin/sed "$@"
+SH
+chmod +x "$mock_bin/sed"
+rm "$applications/firefox.desktop"
+if omarchy-refresh-browser-handoff; then
+  fail "handoff reports a failed write"
+fi
+rm "$mock_bin/sed"
+[[ -z $(find "$applications" -name 'firefox.desktop' -o -name '.*') ]] ||
+  fail "a failed write leaves no partial entry behind"
+pass "a failed write leaves no partial entry behind"
 
 handoff_log="$test_tmp/handoff"
 focus_log="$test_tmp/focus"
