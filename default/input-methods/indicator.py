@@ -144,39 +144,33 @@ def profile_path():
   return os.path.join(directory, "profile")
 
 
-def resolution(path, hops=40):
-  """The path as written, then as it reads after each symlink on the way."""
-  paths = [path]
-  for _ in range(hops):
-    prefix, parts = "/", path.strip("/").split("/")
-    for index, part in enumerate(parts):
-      candidate = os.path.join(prefix, part)
-      if os.path.islink(candidate):
-        # The prefix holds no links, so the target's ".." resolves lexically.
-        path = os.path.normpath(os.path.join(prefix, os.readlink(candidate), *parts[index + 1:]))
-        paths.append(path)
-        break
-      prefix = candidate
-    else:
-      break
-  return paths
-
-
-def watched_entries():
+def watched_entries(hops=40):
   # Saves rename a new profile into place, and a dotfile manager may link the
   # profile, its directory or the configuration home elsewhere, chain links, or
-  # replace a linked directory. Watch each directory the lookup passes through
-  # for the one entry it holds, along every hop of the resolution, up to the
-  # home directory.
+  # replace a linked directory. Resolve the path the way the kernel does, one
+  # component at a time, and watch each directory it passes through for the one
+  # entry it looks up there, from the home directory down.
   home = os.path.realpath(os.path.expanduser("~"))
   entries = []
-  for path in resolution(profile_path()):
-    directory, name = os.path.split(path)
-    while name:
-      entries.append((directory, name))
-      if os.path.realpath(directory) == home:
-        break
-      directory, name = os.path.split(directory)
+  current, pending = "/", profile_path().split("/")
+  while pending:
+    part = pending.pop(0)
+    if part in ("", "."):
+      continue
+    if part == "..":
+      current = os.path.dirname(current)
+      continue
+    if not home.startswith(current.rstrip("/") + "/"):
+      entries.append((current, part))
+    candidate = os.path.join(current, part)
+    if os.path.islink(candidate) and hops > 0:
+      hops -= 1
+      target = os.readlink(candidate)
+      if target.startswith("/"):
+        current = "/"
+      pending = target.split("/") + pending
+    else:
+      current = candidate
   return list(dict.fromkeys(entries))
 
 

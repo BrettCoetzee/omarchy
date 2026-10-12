@@ -351,6 +351,26 @@ def scenario():
     step(0.6, middle_relinked)
   def middle_relinked():
     assert methods() == ["keyboard-us", "rime"], state_lines
+    # A link whose target steps back out of another link:
+    # fcitx5 -> store/redirect/../fcitx5, with store/redirect -> ../x/inner.
+    live["methods"] = ["keyboard-us"]
+    for side in ("x", "y"):
+      os.makedirs(f"{config_home}/{side}/inner")
+      os.makedirs(f"{config_home}/{side}/fcitx5")
+    save("x/fcitx5")
+    os.symlink("../x/inner", config_home + "/store/redirect")
+    os.rename(config_home + "/fcitx5", config_home + "/fcitx5.old")
+    os.symlink("store/redirect/../fcitx5", config_home + "/fcitx5")
+    step(0.6, redirected)
+  def redirected():
+    assert methods() == ["keyboard-us"], state_lines
+    live["methods"] = ["keyboard-us", "sayura"]
+    save("y/fcitx5")
+    os.symlink("../y/inner", config_home + "/store/redirect.new")
+    os.replace(config_home + "/store/redirect.new", config_home + "/store/redirect")
+    step(0.6, redirect_repointed)
+  def redirect_repointed():
+    assert methods() == ["keyboard-us", "sayura"], state_lines
     close_stdin()
   step(1.0, single_method_settled)
 
