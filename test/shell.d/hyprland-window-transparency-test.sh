@@ -222,8 +222,26 @@ if command -v script >/dev/null; then
   printf '# omarchy-glass begin\n[colors-dark]\nalpha=0.65\nblur=yes\n# omarchy-glass end\n' >>"$foot_theme/foot.ini"
   set_foot
   grep -qF $'\e]11;[65]#102030' "$tmpdir/typescript" || fail "running foot terminals turn glassy"
-  kill "$script_pid" 2>/dev/null || true
   pass "running foot terminals take the theme's background alpha, found in one process scan"
+
+  # A kernel without CONFIG_PROC_CHILDREN has no children list. A foot pid with
+  # no /proc entry stands in for that, and its shell is then found by pgrep -P.
+  missing_pid=4194303
+  if [[ ! -e /proc/$missing_pid ]]; then
+    shell_pid=$(pgrep -P "$script_pid" | head -1)
+    mkdir -p "$tmpdir/no-children-bin"
+    printf '#!/bin/bash\nif [[ $1 == "-x" && $2 == "foot" ]]; then echo %s; elif [[ $1 == "-P" && $2 == %s ]]; then echo %s; else exit 1; fi\n' \
+      "$missing_pid" "$missing_pid" "$shell_pid" >"$tmpdir/no-children-bin/pgrep"
+    chmod +x "$tmpdir/no-children-bin/pgrep"
+    printf 'background = "#203040"\nforeground = "#ffffff"\n' >"$foot_theme/colors.toml"
+    HOME="$foot_home" PATH="$tmpdir/no-children-bin:$ROOT/bin:$PATH" omarchy-theme-set-foot
+    sleep 0.3
+    grep -qF '#203040' "$tmpdir/typescript" || fail "foot terminals retint without the kernel's children list"
+    pass "foot terminals retint without the kernel's children list"
+  else
+    skip "foot terminals retint without the kernel's children list: pid $missing_pid exists"
+  fi
+  kill "$script_pid" 2>/dev/null || true
 else
   skip "script is not installed"
 fi

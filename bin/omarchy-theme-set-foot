@@ -26,7 +26,13 @@ if [[ -n $background ]]; then
 fi
 
 for foot_pid in $foot_pids; do
-  { child_pids=$(<"/proc/$foot_pid/task/$foot_pid/children"); } 2>/dev/null || continue
+  children="/proc/$foot_pid/task/$foot_pid/children"
+  if [[ -e $children ]]; then
+    { child_pids=$(<"$children"); } 2>/dev/null || continue
+  else
+    # A kernel built without CONFIG_PROC_CHILDREN keeps no such list.
+    child_pids=$(pgrep -P "$foot_pid")
+  fi
   for child_pid in $child_pids; do
     tty=$(readlink "/proc/$child_pid/fd/1" 2>/dev/null)
     [[ $tty == /dev/pts/* ]] && printf '%b' "$foot_osc" >"$tty"
