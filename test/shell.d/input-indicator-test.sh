@@ -307,6 +307,33 @@ assert not errors, errors
 print("ok - one input method is read once and again on a profile save, and several are polled for switches")
 print("ok - an event during polling replaces the poll, a failed read is retried, and a failed group count keeps the reading")
 
+# A profile linked into dotfiles is saved by replacing the link's target, which
+# the watch on the target sees.
+os.makedirs(scratch.name + "/dotfiles")
+os.replace(config_home + "/fcitx5/profile", scratch.name + "/dotfiles/profile")
+os.symlink("../../dotfiles/profile", config_home + "/fcitx5/profile")
+linked = []
+with patch.dict(os.environ, {"XDG_CONFIG_HOME": config_home}):
+  context = indicator.GLib.MainContext.new()
+  context.push_thread_default()
+  profile_watch = indicator.ProfileWatch(lambda: linked.append("changed"))
+  import time
+  def pump(seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+      context.iteration(False)
+      time.sleep(0.01)
+  # Let events from setting up the link go by first.
+  pump(0.3)
+  linked.clear()
+  with open(scratch.name + "/dotfiles/profile.tmp", "w") as file:
+    file.write("[Groups/0]\n")
+  os.replace(scratch.name + "/dotfiles/profile.tmp", scratch.name + "/dotfiles/profile")
+  pump(0.3)
+  context.pop_thread_default()
+assert linked, "a save through a linked profile is seen"
+print("ok - a profile linked into dotfiles is watched at its target")
+
 with patch.dict(os.environ, {"XDG_CONFIG_HOME": "/xdg", "FCITX_CONFIG_HOME": "/fcitx"}):
   assert indicator.profile_path() == "/fcitx/profile"
   del os.environ["FCITX_CONFIG_HOME"]

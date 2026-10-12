@@ -180,14 +180,18 @@ class ProfileWatch:
 
   def __init__(self, changed):
     self.changed = changed
-    self.monitor = None
+    self.monitors = []
     self.bind(None)
 
   def bind(self, owner):
-    if self.monitor:
-      self.monitor.cancel()
-    self.monitor = Gio.File.new_for_path(profile_path(owner)).monitor_file(Gio.FileMonitorFlags.WATCH_MOVES, None)
-    self.monitor.connect("changed", lambda *_: self.changed())
+    for monitor in self.monitors:
+      monitor.cancel()
+    # A profile linked into dotfiles is saved by replacing the link's target.
+    path = profile_path(owner)
+    self.monitors = [Gio.File.new_for_path(watched).monitor_file(Gio.FileMonitorFlags.WATCH_MOVES, None)
+                     for watched in dict.fromkeys([path, os.path.realpath(path)])]
+    for monitor in self.monitors:
+      monitor.connect("changed", lambda *_: self.changed())
 
 
 def follow(bus, changed, presence):
