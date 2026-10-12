@@ -155,6 +155,19 @@ Item {
       compare(painted(hairline).height, 60, "covering the box")
     }
 
+    // The clipboard reuses a preview for the next row's image.
+    function test_the_next_image_after_a_thin_strip_decodes_normally() {
+      tryVerify(function() { return hairline.status === Image.Ready && bitmap(hairline).height === 1 }, 2000)
+      var thin = hairline.url
+      hairline.url = root.bigImage
+      tryVerify(function() { return hairline.status === Image.Ready && bitmap(hairline).width > 1 }, 2000,
+        "decoded " + bitmap(hairline).width + "x" + bitmap(hairline).height)
+      compare(bitmap(hairline).width, Math.ceil(120 * Screen.devicePixelRatio), "decoded to the crop bound, not as a sliver")
+      hairline.url = thin
+      tryVerify(function() { return hairline.status === Image.Ready && bitmap(hairline).height === 1 }, 2000,
+        "and the strip falls back again: " + bitmap(hairline).width + "x" + bitmap(hairline).height)
+    }
+
     function test_clipboard_svg_captures_count_as_svgs() {
       var probe = Qt.createQmlObject('import "../../../../shell/Ui"; SizedImage {}', root)
       probe.url = "file:///state/clipboard-images/abc.svg+xml"

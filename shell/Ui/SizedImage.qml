@@ -41,8 +41,10 @@ Item {
   // to nothing decodes empty. It is decoded again covering a single pixel
   // instead: one pixel across and its aspect ratio long, still a sliver of
   // the file however large that is.
-  property bool thinDecode: false
-  onUrlChanged: thinDecode = false
+  // Remembered by URL rather than as a flag to reset, so switching to another
+  // image can't carry the fallback over to it.
+  property string thinUrl: ""
+  readonly property bool thinDecode: thinUrl !== "" && thinUrl === String(url)
 
   clip: crop
 
@@ -69,7 +71,7 @@ Item {
     sourceSize.height: bounded ? Math.ceil(root.height * root.reach * Screen.devicePixelRatio) : root.thinDecode ? 1 : 0
     onStatusChanged: {
       var empty = status === Image.Error || (status === Image.Ready && (implicitWidth === 0 || implicitHeight === 0))
-      if (bounded && empty) root.thinDecode = true
+      if (bounded && empty) root.thinUrl = String(source)
     }
     // A thin decode covers its 1x1 bound, so its short side is one pixel.
     fillMode: root.scalable || root.thinDecode
