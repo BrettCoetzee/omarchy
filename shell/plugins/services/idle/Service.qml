@@ -38,7 +38,8 @@ Item {
   property bool idledThisCycle: false
   property bool screensaverStartedThisCycle: false
   property bool blankedOnBattery: false
-  property bool wakeAfterBlank: false
+  property bool wakePending: false
+  property bool stopPending: false
   property string lastEvent: "starting"
   property string lastEventAt: ""
   property var screensaverWindows: ({})
@@ -105,6 +106,34 @@ Item {
 
   // Unplugged while the screensaver runs: close it and blank instead. Its
   // windows closing is not the user dismissing it.
+  // Waking must be the last display action: a blank still running finishes
+  // first, and a wake already running may have turned the displays on before
+  // that blank, so either way another wake follows.
+  function requestWake() {
+    if (blankProcess.running || wakeProcess.running) {
+      root.wakePending = true
+      return
+    }
+    root.wakePending = false
+    runProcess(wakeProcess, "wake", "omarchy-system-wake")
+  }
+
+  function runPendingWake() {
+    if (root.wakePending) requestWake()
+  }
+
+  // Closes every screensaver, including the launcher still opening them on
+  // other monitors; a window that opens while this runs is closed by a rerun.
+  function stopScreensavers() {
+    if (screensaverStopProcess.running) {
+      root.stopPending = true
+      return
+    }
+    root.stopPending = false
+    runProcess(screensaverStopProcess, "screensaver-stop",
+      "pkill -TERM -f '[b]in/omarchy-launch-screensaver'; pkill -TERM -f '[b]in/omarchy-screensaver$'")
+  }
+
   function handlePowerSourceChanged() {
     if (!UPower.onBattery || !root.idledThisCycle || root.blankedOnBattery) return
     if (!root.screensaverStartedThisCycle || root.screensaverWindowCount === 0) return
@@ -112,7 +141,7 @@ Item {
     // screensaver up): close it and end the cycle rather than blanking.
     if (!idleMonitor.isIdle) cancelIdleCycle("unplugged-while-active")
     else blankOnBattery("unplugged-during-screensaver")
-    runProcess(screensaverStopProcess, "screensaver-stop", "pkill -TERM -f '[b]in/omarchy-screensaver$'")
+    stopScreensavers()
   }
 
   function lockSystem(reason) {
@@ -164,12 +193,7 @@ Item {
     lockTimer.stop()
     screensaverLaunchGraceTimer.stop()
 
-    // Waking must be the last display action, so a blank still running is
-    // left to finish and the wake follows it.
-    if (root.idledThisCycle) {
-      if (blankProcess.running) root.wakeAfterBlank = true
-      else runProcess(wakeProcess, "wake", "omarchy-system-wake")
-    }
+    if (root.idledThisCycle) requestWake()
 
     root.idledThisCycle = false
     root.screensaverStartedThisCycle = false
@@ -191,8 +215,9 @@ Item {
   function handleScreensaverWindowOpened(address) {
     setScreensaverWindow(address, true)
     screensaverLaunchGraceTimer.stop()
-    // Unplugged while it was still starting.
-    handlePowerSourceChanged()
+    // Unplugged while it was still starting, or opened after blanking began.
+    if (root.blankedOnBattery) stopScreensavers()
+    else handlePowerSourceChanged()
   }
 
   function handleScreensaverWindowClosed(address) {
@@ -372,14 +397,13 @@ Item {
     id: blankProcess
     onExited: function(exitCode, exitStatus) {
       root.logEvent("process-exit", "battery-blank exitCode=" + exitCode + " status=" + exitStatus)
-      if (!root.wakeAfterBlank) return
-      root.wakeAfterBlank = false
-      root.runProcess(wakeProcess, "wake", "omarchy-system-wake")
+      root.runPendingWake()
     }
   }
 
   Process {
     id: screensaverStopProcess
+    onExited: if (root.stopPending) root.stopScreensavers()
   }
 
   Connections {
@@ -397,7 +421,10 @@ Item {
   }
   Process {
     id: wakeProcess
-    onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "wake exitCode=" + exitCode + " status=" + exitStatus) }
+    onExited: function(exitCode, exitStatus) {
+      root.logEvent("process-exit", "wake exitCode=" + exitCode + " status=" + exitStatus)
+      root.runPendingWake()
+    }
   }
 
   Process {
