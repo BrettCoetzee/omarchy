@@ -18,6 +18,7 @@ BACKGROUND_TRANSITION_CACHE="$HOME/.cache/omarchy/background-transitions"
 THEME_SET_LOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set.lock"
 THEME_SET_LOG="$HOME/.local/state/omarchy/theme-set.log"
 THEME_RETINT_LOCK="${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set-retint.lock"
+THEME_GENERATION_PATH="${XDG_RUNTIME_DIR:-/tmp}/omarchy-theme-set.generation"
 USER_THEMES_PATH="$HOME/.config/omarchy/themes"
 OMARCHY_THEMES_PATH="$OMARCHY_PATH/themes"
 
@@ -490,7 +491,10 @@ fi
 # Swap next theme in as current
 rm -rf "$CURRENT_THEME_PATH"
 mv "$NEXT_THEME_PATH" "$CURRENT_THEME_PATH"
-APPLIED_THEME_ID=$(stat -Lc '%d:%i' "$CURRENT_THEME_PATH")
+# Name this switch, so its deferred retints can tell when a later one replaced
+# the theme. A directory's inode would do, except that it can be reused.
+APPLIED_THEME_GENERATION="$$-${EPOCHREALTIME//[!0-9]/}"
+printf '%s\n' "$APPLIED_THEME_GENERATION" 2>/dev/null >"$THEME_GENERATION_PATH"
 
 # Store theme name for reference
 echo "$THEME_NAME" >"$CURRENT_THEME_NAME_PATH"
@@ -543,6 +547,10 @@ other_theme_commands=(
   omarchy-theme-set-keyboard
 )
 
+theme_still_current() {
+  [[ $(<"$THEME_GENERATION_PATH") == "$APPLIED_THEME_GENERATION" ]] 2>/dev/null
+}
+
 apply_other_theme_commands() {
   local detached="${1:-}"
 
@@ -559,7 +567,7 @@ apply_other_theme_commands() {
   exec 8>"$THEME_RETINT_LOCK"
   flock 8
   local current=false
-  if [[ $(stat -Lc '%d:%i' "$CURRENT_THEME_PATH" 2>/dev/null) == "$APPLIED_THEME_ID" ]]; then
+  if theme_still_current; then
     current=true
   fi
 
@@ -583,7 +591,7 @@ apply_other_theme_commands() {
 
   # A newer switch replaced this theme during the hook, so its failures say
   # nothing about the apps any more; the newer batch reports its own.
-  if [[ $(stat -Lc '%d:%i' "$CURRENT_THEME_PATH" 2>/dev/null) == "$APPLIED_THEME_ID" ]]; then
+  if theme_still_current; then
     report_failed_theme_commands "$detached"
   fi
 }
