@@ -31,12 +31,29 @@ cp "$SHELL_TEST_DIR/fixtures/media-marquee/shell.qml" "$config_dir/shell.qml"
 ln -s "$ROOT/shell/Ui" "$config_dir/Ui"
 ln -s "$ROOT/shell/Commons" "$config_dir/Commons"
 
+# The scroll honours reduced motion, which Style reads from Hyprland's
+# animations option, so answer that with animations on whatever the session
+# running the suite has set.
+stub_bin="$TMPDIR/bin"
+mkdir -p "$stub_bin"
+real_hyprctl=$(command -v hyprctl)
+cat >"$stub_bin/hyprctl" <<EOF
+#!/bin/bash
+if [[ \$* == *"animations:enabled"* ]]; then
+  printf '{"option":"animations:enabled","bool":true}\n'
+else
+  exec "$real_hyprctl" "\$@"
+fi
+EOF
+chmod +x "$stub_bin/hyprctl"
+
 OMARCHY_PATH="$ROOT" \
 OMARCHY_QML_TEST_RESULT="$result" \
 HOME="$TMPDIR/home" \
 XDG_CONFIG_HOME="$TMPDIR/home/.config" \
 XDG_CACHE_HOME="$TMPDIR/home/.cache" \
 XDG_STATE_HOME="$TMPDIR/home/.local/state" \
+PATH="$stub_bin:$PATH" \
   quickshell -p "$config_dir" --no-color >"$log" 2>&1 &
 QS_PID=$!
 

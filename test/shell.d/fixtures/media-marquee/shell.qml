@@ -18,6 +18,13 @@ ShellRoot {
     id: host
     width: 400
     height: 40
+
+    // Hidden and shown again like a bar slot. A parentless item can't be
+    // shown again, so the toggle lives one level down.
+    Item {
+      id: slot
+      anchors.fill: parent
+    }
   }
 
   QtObject {
@@ -124,13 +131,16 @@ ShellRoot {
   function start() {
     var component = Qt.createComponent("file://" + rootPath + "/shell/plugins/services/media/BarWidget.qml", Component.PreferSynchronous)
     if (component.status !== Component.Ready) throw new Error(component.errorString())
-    widget = component.createObject(host, { bar: fakeBar, moduleName: "omarchy.media" })
+    widget = component.createObject(slot, { bar: fakeBar, moduleName: "omarchy.media" })
     if (!widget) throw new Error(component.errorString())
     steps = [
       // A paused track's metadata arrives, as it does from MPRIS.
       [300, function() {
         player.trackTitle = "A track title long enough that it can never fit in the bar at once"
         player.trackArtist = "An artist with a name that also takes room"
+      }],
+      [1000, function() {
+        check(!Style.reduceMotion, "the fixture runs with animations on")
       }],
       [1000, function() {
         label = findLabel(widget)
@@ -165,11 +175,21 @@ ShellRoot {
       }],
       [300, function() {
         check(moving(), "showing the bar scrolls again")
-        host.visible = false
+        slot.visible = false
       }],
       [100, function() { moving() }],
       [400, function() {
         check(!moving(), "a widget that is not shown stops the scroll")
+        slot.visible = true
+      }],
+      [300, function() { moving() }],
+      [300, function() {
+        check(moving(), "showing the widget scrolls again")
+        Style.reduceMotion = true
+      }],
+      [100, function() { moving() }],
+      [400, function() {
+        check(!moving() && label.x === 0, "reduced motion stops the scroll at the title's start")
       }]
     ]
     next()
