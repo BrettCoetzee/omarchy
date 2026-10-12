@@ -277,3 +277,24 @@ printf 'typed-password\n' |
     OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 /bin/bash "$ROOT/bin/omarchy-theme-set" alpha >/dev/null 2>&1
 grep -qx 'browser-stdin typed-password' "$log" || fail "a waited-for retint reads the switch's stdin" "$(cat "$log")"
 pass "a waited-for switch gives the retints its stdin"
+
+# Alpha's VS Code retint fails, but beta replaces alpha during alpha's hook and
+# applies cleanly. Alpha's stale failure is not reported against beta.
+rm -f "$test_tmp/held" "$test_tmp/slow-hook-started" "$test_tmp/later-batch-done"
+touch "$test_tmp/release"
+TEST_VSCODE_OK_THEME=beta TEST_SLOW_HOOK_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
+for attempt in {1..250}; do
+  [[ ! -f $test_tmp/slow-hook-started ]] || break
+  sleep 0.02
+done
+TEST_VSCODE_OK_THEME=beta TEST_SLOW_HOOK_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme beta
+for attempt in {1..250}; do
+  (( $(grep -cx 'omarchy-hook' "$log") >= 2 )) && break
+  sleep 0.02
+done
+touch "$test_tmp/later-batch-done"
+wait_for_detached_work
+! grep -q '^notify: ' "$log" || fail "a superseded batch does not report its failures" "$(cat "$log")"
+! grep -q 'Theme retint failed' "$home/.local/state/omarchy/theme-set.log" ||
+  fail "a superseded batch's failure stays out of the newer switch's log" "$(cat "$home/.local/state/omarchy/theme-set.log")"
+pass "a superseded batch does not report failures against the newer theme"

@@ -581,7 +581,11 @@ apply_other_theme_commands() {
   # theme itself, and that switch's batch needs the lock.
   omarchy-hook theme-set "$THEME_NAME" >/dev/null
 
-  report_failed_theme_commands "$detached"
+  # A newer switch replaced this theme during the hook, so its failures say
+  # nothing about the apps any more; the newer batch reports its own.
+  if [[ $(stat -Lc '%d:%i' "$CURRENT_THEME_PATH" 2>/dev/null) == "$APPLIED_THEME_ID" ]]; then
+    report_failed_theme_commands "$detached"
+  fi
 }
 
 if [[ $THEME_HEADLESS != "1" ]]; then
