@@ -46,7 +46,11 @@ Item {
   property string thinUrl: ""
   readonly property bool thinDecode: thinUrl !== "" && thinUrl === String(url)
   property string failedUrl: ""
-  onUrlChanged: failedUrl = ""
+  property string recheckedUrl: ""
+  onUrlChanged: {
+    failedUrl = ""
+    recheckedUrl = ""
+  }
 
   clip: crop
 
@@ -74,12 +78,22 @@ Item {
     onStatusChanged: {
       var loaded = String(source)
       if (root.thinDecode) {
-        // A strip that really rounded away comes back longer than the bound.
-        // Anything shorter was an ordinary image whose bounded load failed
-        // for another reason, such as a file that only appeared later, so
-        // load it bounded again; a failure here gives up on the fallback.
-        var bound = Math.ceil(Math.max(root.width, root.height) * root.reach * Screen.devicePixelRatio)
-        if (status === Image.Error || (status === Image.Ready && Math.max(implicitWidth, implicitHeight) < bound)) root.thinUrl = ""
+        if (status === Image.Error) {
+          root.thinUrl = ""
+        } else if (status === Image.Ready && root.recheckedUrl !== loaded) {
+          // The fallback's bitmap has the image's aspect ratio. If fitting
+          // that in the bound keeps at least a pixel across, the bounded load
+          // failed for another reason, such as art that only appeared later,
+          // so load it bounded again. Only once per URL, so a disagreement
+          // about rounding can't flip back and forth.
+          var boundWidth = Math.ceil(root.width * root.reach * Screen.devicePixelRatio)
+          var boundHeight = Math.ceil(root.height * root.reach * Screen.devicePixelRatio)
+          var across = Math.min(boundWidth / implicitWidth, boundHeight / implicitHeight) * Math.min(implicitWidth, implicitHeight)
+          if (across >= 1) {
+            root.recheckedUrl = loaded
+            root.thinUrl = ""
+          }
+        }
         return
       }
       if (!bounded) return

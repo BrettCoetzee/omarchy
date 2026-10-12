@@ -70,6 +70,16 @@ Item {
     url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAH0AAAAAECAMAAAA0cPmbAAAAA1BMVEUA/wA0XsCoAAAANUlEQVR42u3BMQEAAADCoPVP7WkJoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABufQQAAcZAqtEAAAAASUVORK5CYII="
   }
 
+  // A 4500x10 strip in a tall preview pane, 200x500 physical pixels, where
+  // the box's narrow side limits the fit. Fitted, it is 200x0.4: too thin to
+  // decode, though shorter than the box's long side.
+  SizedImage {
+    id: paneStrip
+    width: 200 / Screen.devicePixelRatio
+    height: 500 / Screen.devicePixelRatio
+    url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAEZQAAAAKCAMAAAAK9pzeAAAAA1BMVEUAAP+KeNJXAAAAQklEQVR42u3BMQEAAADCoPVPbQwfoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADgYa/SAAEgwyXOAAAAAElFTkSuQmCC"
+  }
+
   // A 400x10 SVG strip.
   SizedImage {
     id: vector
@@ -182,6 +192,15 @@ Item {
       compare(spy.count, settled, "nothing more happens")
       missing.destroy()
       spy.destroy()
+    }
+
+    function test_a_thin_strip_in_a_tall_box_still_draws() {
+      tryVerify(function() { return paneStrip.status === Image.Ready && bitmap(paneStrip).height === 1 }, 2000,
+        "decoded " + bitmap(paneStrip).width + "x" + bitmap(paneStrip).height)
+      compare(bitmap(paneStrip).width, 450, "one pixel across and its aspect ratio long")
+      compare(painted(paneStrip).width, paneStrip.width, "drawn across the box's narrow side")
+      wait(200)
+      compare(bitmap(paneStrip).height, 1, "and it stays that way")
     }
 
     function test_clipboard_svg_captures_count_as_svgs() {
