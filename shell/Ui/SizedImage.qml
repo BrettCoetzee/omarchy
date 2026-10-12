@@ -36,6 +36,11 @@ Item {
   // Clipboard captures name the file after the MIME subtype, as in .svg+xml.
   readonly property bool scalable: /(\.svgz?|\.svg\+xml)([?#].*)?$|^data:image\/svg/i.test(String(url))
   readonly property real reach: crop ? 2 : 1
+  // A strip thin enough that fitting it in the bound rounds its short side
+  // to nothing decodes empty, so it falls back to the file's own size, which
+  // for such a strip is small anyway.
+  property bool nativeDecode: false
+  onUrlChanged: nativeDecode = false
 
   clip: crop
 
@@ -57,8 +62,13 @@ Item {
       : (root.height - height) / 2
 
     source: root.sized ? root.url : ""
-    sourceSize.width: root.sized && !root.scalable ? Math.ceil(root.width * root.reach * Screen.devicePixelRatio) : 0
-    sourceSize.height: root.sized && !root.scalable ? Math.ceil(root.height * root.reach * Screen.devicePixelRatio) : 0
+    readonly property bool bounded: root.sized && !root.scalable && !root.nativeDecode
+    sourceSize.width: bounded ? Math.ceil(root.width * root.reach * Screen.devicePixelRatio) : 0
+    sourceSize.height: bounded ? Math.ceil(root.height * root.reach * Screen.devicePixelRatio) : 0
+    onStatusChanged: {
+      var empty = status === Image.Error || (status === Image.Ready && (implicitWidth === 0 || implicitHeight === 0))
+      if (bounded && empty) root.nativeDecode = true
+    }
     fillMode: !root.scalable ? Image.Stretch : root.crop ? Image.PreserveAspectCrop : Image.PreserveAspectFit
     horizontalAlignment: root.horizontalAlignment
     verticalAlignment: root.verticalAlignment

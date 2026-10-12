@@ -60,6 +60,16 @@ Item {
     url: root.narrowImage
   }
 
+  // A 4000x10 strip, thin enough that fitting it in a 60px bound rounds its
+  // height to nothing.
+  SizedImage {
+    id: hairline
+    width: 60
+    height: 60
+    crop: true
+    url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAD6AAAAAKCAMAAACXblFRAAAAA1BMVEUA/wA0XsCoAAAAPUlEQVR42u3BgQAAAADDoPlTH+AKVQEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAG+cSgABzUFeLgAAAABJRU5ErkJggg=="
+  }
+
   // A 400x10 SVG strip.
   SizedImage {
     id: vector
@@ -135,6 +145,13 @@ Item {
       var size = bitmap(stripArt)
       verify(size.width <= 400 && size.height <= 10, "a narrow strip is not enlarged: " + size.width + "x" + size.height)
       compare(painted(stripArt).height, 60, "yet still covers the box when drawn")
+    }
+
+    function test_a_strip_too_thin_to_shrink_still_draws() {
+      tryVerify(function() { return hairline.status === Image.Ready && bitmap(hairline).height > 0 }, 2000,
+        "decoded " + bitmap(hairline).width + "x" + bitmap(hairline).height)
+      compare(bitmap(hairline).width, 4000, "at the file's own size")
+      compare(painted(hairline).height, 60, "covering the box")
     }
 
     function test_clipboard_svg_captures_count_as_svgs() {
