@@ -23,6 +23,7 @@ steps=(
   omarchy-migrate
   omarchy-hook
   omarchy-update-aur-pkgs
+  omarchy-refresh-browser-handoff
   omarchy-update-mise
   omarchy-update-orphan-pkgs
   omarchy-update-analyze-logs
@@ -79,6 +80,7 @@ expected_steps() {
     omarchy-hook \
     omarchy-update-mise \
     omarchy-update-aur-pkgs \
+    omarchy-refresh-browser-handoff \
     omarchy-update-stay-awake \
     omarchy-update-restart
 }

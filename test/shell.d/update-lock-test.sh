@@ -66,6 +66,7 @@ for command in \
   omarchy-update-system-pkgs \
   omarchy-migrate \
   omarchy-update-aur-pkgs \
+  omarchy-refresh-browser-handoff \
   omarchy-update-mise \
   omarchy-update-orphan-pkgs \
   omarchy-hook \

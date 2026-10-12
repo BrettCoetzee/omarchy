@@ -148,6 +148,10 @@ if [[ ${1:-} == "-y" ]] || omarchy-update-confirm; then
   PATH="$OMARCHY_PATH/default/omarchy/sudo-no-update:$PATH" OMARCHY_SUDO_NO_UPDATE=1 omarchy-update-aur-pkgs
   omarchy_security_revoke_sudo_timestamp
 
+  # Rebuild the default browser's link hand-off entry from the one its package
+  # just installed, so it picks up any changed actions or flags.
+  omarchy-refresh-browser-handoff
+
   # The sleep inhibitor covers AUR builds, hooks and mise as well; releasing it
   # needs no privilege because the held command already dropped to this user.
   # Release it before offering a reboot: a confirmed reboot can terminate this
