@@ -129,9 +129,12 @@ class Indicator:
     return state
 
   def switchable(self, methods):
-    # With one method in one group the reading cannot change until the
-    # configuration does, and Fcitx saves that to the profile being watched.
-    return len(methods) > 1 or len(call(self.bus, "InputMethodGroups")[0]) > 1
+    # With one keyboard method in one group the reading cannot change until the
+    # configuration does, and Fcitx saves that to the profile being watched. A
+    # lone composition engine still toggles, and steps aside in password fields.
+    if len(methods) > 1 or not all(method.startswith("keyboard-") for method in methods):
+      return True
+    return len(call(self.bus, "InputMethodGroups")[0]) > 1
 
 
 def profile_path():
@@ -143,14 +146,19 @@ def profile_path():
 
 def watched_entries():
   # Saves rename a new profile into place, and a dotfile manager may link the
-  # profile or its directory elsewhere, or replace a linked directory. Watch the
-  # profile's directory and that directory's parent, along both the path as
-  # written and the path it resolves to, for the one entry each level holds.
+  # profile, its directory or the configuration home elsewhere, or replace a
+  # linked directory. Watch each directory on the way to the profile for the
+  # one entry it holds, along the path as written and the path it resolves to,
+  # up to the home directory.
+  home = os.path.realpath(os.path.expanduser("~"))
   entries = []
   for path in dict.fromkeys([profile_path(), os.path.realpath(profile_path())]):
-    directory = os.path.dirname(path)
-    entries += [(directory, os.path.basename(path)),
-                (os.path.dirname(directory), os.path.basename(directory))]
+    directory, name = os.path.split(path)
+    while name:
+      entries.append((directory, name))
+      if os.path.realpath(directory) == home:
+        break
+      directory, name = os.path.split(directory)
   return list(dict.fromkeys(entries))
 
 

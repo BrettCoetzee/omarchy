@@ -178,7 +178,11 @@ print("ok - cycling back walks the same choices in reverse")
 # replaced by `live`, which a configuration change edits before saving.
 import sys
 import tempfile
-config_home = tempfile.mkdtemp()
+# The configuration home is itself a link, as a dotfile manager may make it.
+config_root = tempfile.mkdtemp()
+os.makedirs(config_root + "/home-a")
+os.symlink("home-a", config_root + "/config")
+config_home = config_root + "/config"
 os.makedirs(config_home + "/first")
 os.makedirs(config_home + "/second")
 os.makedirs(config_home + "/third")
@@ -315,6 +319,20 @@ def scenario():
     step(0.6, saved_in_replaced_target)
   def saved_in_replaced_target():
     assert methods() == ["keyboard-us", "chewing"], state_lines
+    # Relinking the configuration home moves the watch to the new one.
+    live["methods"] = ["keyboard-us"]
+    os.makedirs(config_root + "/home-b/fcitx5")
+    save("../home-b/fcitx5")
+    os.symlink("home-b", config_root + "/config.new")
+    os.replace(config_root + "/config.new", config_root + "/config")
+    step(0.6, home_relinked)
+  def home_relinked():
+    assert methods() == ["keyboard-us"], state_lines
+    live["methods"] = ["keyboard-us", "anthy"]
+    save("fcitx5")
+    step(0.6, saved_in_new_home)
+  def saved_in_new_home():
+    assert methods() == ["keyboard-us", "anthy"], state_lines
     close_stdin()
   step(1.0, single_method_settled)
 
@@ -346,7 +364,8 @@ with patch.object(indicator, "call", return_value=(groups,)):
   groups.pop()
   assert not indicator.Indicator(None).switchable(["keyboard-us"])
   assert indicator.Indicator(None).switchable(["keyboard-us", "mozc"])
-print("ok - a second group keeps a single-method group polled, since a group switch has no signal either")
+  assert indicator.Indicator(None).switchable(["pinyin"])
+print("ok - a second group or a lone composition engine keeps polling, since neither switch has a signal")
 
 PY
 
