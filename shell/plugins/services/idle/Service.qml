@@ -75,8 +75,20 @@ Item {
   }
 
   function runScreensaverStage() {
-    if (IdleModel.screensaverStageLocks(UPower.onBattery, root.lockEnabled)) lockSystem("screensaver-on-battery")
-    else launchScreensaver()
+    if (!UPower.onBattery || !root.lockEnabled) {
+      launchScreensaver()
+      return
+    }
+    // Read the screensaver toggle (omarchy-toggle-enabled screensaver-off)
+    // before locking in its place.
+    if (!screensaverOffProbe.running) screensaverOffProbe.running = true
+  }
+
+  function finishBatteryScreensaverStage(screensaverOff) {
+    if (!root.idleEnabled || !root.idledThisCycle) return
+    if (IdleModel.screensaverStageLocks(UPower.onBattery, root.lockEnabled, screensaverOff)) lockSystem("screensaver-on-battery")
+    else if (!screensaverOff) launchScreensaver()
+    else logEvent("screensaver-stage-skipped", "screensaver off")
   }
 
   function lockSystem(reason) {
@@ -307,6 +319,12 @@ Item {
   Connections {
     target: Hyprland
     function onRawEvent(event) { root.handleHyprlandEvent(event) }
+  }
+
+  Process {
+    id: screensaverOffProbe
+    command: ["bash", "-c", "[[ -f $HOME/.local/state/omarchy/toggles/screensaver-off ]]"]
+    onExited: function(exitCode) { root.finishBatteryScreensaverStage(exitCode === 0) }
   }
 
   Process {

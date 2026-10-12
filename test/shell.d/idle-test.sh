@@ -24,6 +24,7 @@ assertEqual(idle.screensaverStageLocks(true, true), true, 'idle locks at the scr
 assertEqual(idle.screensaverStageLocks(false, true), false, 'idle shows the screensaver on AC')
 assertEqual(idle.screensaverStageLocks(true, false), false, 'idle shows the screensaver on battery when locking is off')
 assertEqual(idle.screensaverStageLocks(undefined, true), false, 'idle shows the screensaver when the power source is unknown')
+assertEqual(idle.screensaverStageLocks(true, true, true), false, 'idle keeps the lock deadline on battery when the screensaver is turned off')
 
 assert(
   serviceSource.includes('IdleModel.firstIdleTimeout(screensaverTimeoutSeconds, lockTimeoutSeconds)'),
