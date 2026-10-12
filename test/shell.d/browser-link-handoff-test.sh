@@ -66,6 +66,7 @@ grep -qxF "Exec=omarchy-cmd-browser-open testium %U" "$shadow" ||
 grep -qxF "Exec=omarchy-cmd-browser-open testium --incognito" "$shadow" ||
   fail "handoff routes the browser's actions through the opener"
 ! grep -q "^DBusActivatable=" "$shadow" || fail "handoff drops D-Bus activation, which would bypass Exec"
+grep -qxF "TryExec=testium" "$shadow" || fail "handoff makes its entry depend on the browser being installed"
 [[ -z $(find "$applications" -name '.*') ]] || fail "handoff leaves no temporary files behind"
 pass "handoff shadows the default browser with an entry that goes through the opener"
 
@@ -93,6 +94,14 @@ omarchy-refresh-browser-handoff
 grep -qxF "Exec=firefox --my-profile %u" "$applications/firefox.desktop" ||
   fail "handoff leaves a user's own browser entry alone"
 pass "handoff leaves a user's own browser entry alone"
+
+rm "$applications/firefox.desktop"
+printf '[Desktop Entry]\nTryExec=firefox-bin\nExec=firefox %%u\n' >"$test_tmp/system/applications/firefox.desktop"
+omarchy-refresh-browser-handoff
+(( $(grep -c "^TryExec=" "$applications/firefox.desktop") == 1 )) &&
+  grep -qxF "TryExec=firefox-bin" "$applications/firefox.desktop" ||
+  fail "handoff keeps the browser's own TryExec"
+pass "handoff keeps the browser's own TryExec"
 
 # Fail the copy halfway through, as a full disk would.
 cat >"$mock_bin/sed" <<'SH'

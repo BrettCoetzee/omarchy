@@ -30,13 +30,20 @@ if [[ -n $default_browser && $default_browser == *.desktop ]]; then
       source_entry="$data_dir/applications/$default_browser"
       [[ -r $source_entry ]] || continue
 
+      # The opener is always on PATH, so without a TryExec of the browser's own,
+      # GLib would keep using this copy after the browser is uninstalled.
+      try_exec=""
+      if ! grep -q "^TryExec=" "$source_entry"; then
+        try_exec=$(sed -n 's/^Exec=\([^ ]*\).*/\1/p' "$source_entry" | head -1)
+      fi
+
       # Write beside the destination and move into place, so a failed write
       # never leaves a partial entry that later refreshes take for the user's.
       # D-Bus activation is dropped, as it would bypass Exec entirely.
       shadow=$(mktemp "$applications/.$default_browser.XXXXXX") || exit 1
       if sed -e "s/^Exec=/Exec=omarchy-cmd-browser-open /" \
         -e "/^DBusActivatable=/d" \
-        -e "/^\[Desktop Entry\]$/a $marker" \
+        -e "/^\[Desktop Entry\]$/a $marker${try_exec:+\\nTryExec=$try_exec}" \
         "$source_entry" >"$shadow"; then
         chmod 644 "$shadow"
         mv -f "$shadow" "$applications/$default_browser"
