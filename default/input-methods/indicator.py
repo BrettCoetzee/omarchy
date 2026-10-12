@@ -134,25 +134,58 @@ class Indicator:
     return len(methods) > 1 or len(call(self.bus, "InputMethodGroups")[0]) > 1
 
 
+def config_home():
+  return os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+
+
 def profile_paths():
-  config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-  profile = os.path.join(config_home, "fcitx5", "profile")
+  profile = os.path.join(config_home(), "fcitx5", "profile")
   # A dotfile manager may link the profile elsewhere; follow both ends.
   return list(dict.fromkeys([profile, os.path.realpath(profile)]))
 
 
-def follow(bus, changed):
+class ProfileWatch:
+  """Calls changed() whenever the profile Fcitx saves its configuration to changes."""
+
+  def __init__(self, changed):
+    self.changed = changed
+    self.monitors = []
+    # Re-resolve when ~/.config/fcitx5 itself is replaced or relinked, which
+    # the monitors on the old target would never see.
+    self.parent = Gio.File.new_for_path(config_home()).monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
+    self.parent.connect("changed", self.parent_changed)
+    self.bind()
+
+  def bind(self):
+    for monitor in self.monitors:
+      monitor.cancel()
+    self.monitors = []
+    for path in profile_paths():
+      monitor = Gio.File.new_for_path(path).monitor_file(Gio.FileMonitorFlags.WATCH_MOVES, None)
+      monitor.connect("changed", self.profile_changed)
+      self.monitors.append(monitor)
+
+  def profile_changed(self, *_):
+    # A relinked profile points somewhere new.
+    self.bind()
+    self.changed()
+
+  def parent_changed(self, monitor, file, other, event):
+    if "fcitx5" in (file.get_basename(), other.get_basename() if other else None):
+      self.profile_changed()
+
+
+def follow(bus, changed, presence):
   # Fcitx sends no signal when its configuration or current method changes
   # (Controller1's InputMethodGroupsChanged stays silent for group edits and
   # switches alike), so follow the service's bus name for restarts and the
   # profile it saves every configuration change to.
-  watchers = [Gio.bus_watch_name_on_connection(bus, BUS, Gio.BusNameWatcherFlags.NONE,
-                                               lambda *_: changed(), lambda *_: changed())]
-  for path in profile_paths():
-    monitor = Gio.File.new_for_path(path).monitor_file(Gio.FileMonitorFlags.WATCH_MOVES, None)
-    monitor.connect("changed", lambda *_: changed())
-    watchers.append(monitor)
-  return watchers
+  def owner(present):
+    presence(present)
+    changed()
+  name = Gio.bus_watch_name_on_connection(bus, BUS, Gio.BusNameWatcherFlags.NONE,
+                                          lambda *_: owner(True), lambda *_: owner(False))
+  return [name, ProfileWatch(changed)]
 
 
 def watch(bus):
@@ -163,13 +196,17 @@ def watch(bus):
   timer = 0
   settle = 0
   polling = False
+  failed = False
+  present = True
 
   def refresh():
-    nonlocal previous, polling
+    nonlocal previous, polling, failed
     try:
       state = indicator.refresh()
       polling = indicator.switchable(state["methods"])
+      failed = False
     except GLib.Error:
+      failed = True
       indicator.pending = ""
       indicator.last = ""
       # Keep the configured cadence: a timed-out call is not a configuration
@@ -181,7 +218,8 @@ def watch(bus):
       previous = line
 
   # Only a pending click or a group with methods to switch between needs
-  # reading again on a timer; everything else waits for an event.
+  # reading again on a timer; everything else waits for an event. A failed
+  # read of a running service is retried, since nothing else would correct it.
   def schedule():
     nonlocal timer
     if timer:
@@ -191,6 +229,8 @@ def watch(bus):
       timer = GLib.timeout_add(50, poll)
     elif polling:
       timer = GLib.timeout_add(500, poll)
+    elif failed and present:
+      timer = GLib.timeout_add(2000, poll)
 
   def poll():
     nonlocal timer
@@ -210,7 +250,13 @@ def watch(bus):
   def settled():
     nonlocal settle
     settle = 0
-    return poll()
+    refresh()
+    schedule()
+    return GLib.SOURCE_REMOVE
+
+  def presence(running):
+    nonlocal present
+    present = running
 
   def command(source, condition):
     nonlocal buffer
@@ -236,7 +282,7 @@ def watch(bus):
   # pressed inside applications.
   GLib.io_add_watch(sys.stdin, GLib.IO_IN | GLib.IO_HUP, command)
   # Held for as long as the loop runs.
-  watchers = follow(bus, changed)  # noqa: F841
+  watchers = follow(bus, changed, presence)  # noqa: F841
   poll()
   loop.run()
 

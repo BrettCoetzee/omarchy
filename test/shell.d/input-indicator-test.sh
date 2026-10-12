@@ -179,19 +179,26 @@ print("ok - cycling back walks the same choices in reverse")
 import sys
 import tempfile
 config_home = tempfile.mkdtemp()
-os.makedirs(config_home + "/fcitx5")
-profile = config_home + "/fcitx5/profile"
-open(profile, "w").write("[Groups/0]\nName=Default\n")
+os.makedirs(config_home + "/first")
+os.makedirs(config_home + "/second")
+# A dotfile manager's layout: the Fcitx directory is a link into the dotfiles.
+os.symlink("first", config_home + "/fcitx5")
+
+def save(directory="first"):
+  with open(f"{config_home}/{directory}/profile", "w") as file:
+    file.write("[Groups/0]\nName=Default\n# " + ",".join(live["methods"]) + "\n")
+
 live = {"methods": ["keyboard-us"], "current": "keyboard-us", "name": "English", "label": "en", "language": "en"}
+save()
 groups = ["Default"]
-lines, timers, reader = [], [], {}
+timers, reader, reads, failures = [], {}, [0], [0]
 real_timeout = indicator.GLib.timeout_add
+real_io_add_watch = indicator.GLib.io_add_watch
 
 def timeout(interval, fn):
   timers.append(interval)
   return real_timeout(interval, fn)
 
-real_io_add_watch = indicator.GLib.io_add_watch
 def register_reader(source, *args):
   # GLib's own loop.run() watches a signal pipe through the same call.
   if source is not sys.stdin:
@@ -203,6 +210,13 @@ def register_reader(source, *args):
 def close_stdin():
   with patch.object(indicator.os, "read", return_value=b""):
     reader["read"](None, None)
+
+def snapshot(bus):
+  reads[0] += 1
+  if failures[0]:
+    failures[0] -= 1
+    raise indicator.GLib.Error("timed out")
+  return dict(live, methods=list(live["methods"]))
 
 # GLib swallows exceptions raised in callbacks, so keep them for the end.
 errors = []
@@ -216,44 +230,78 @@ def step(seconds, then):
     return False
   real_timeout(int(seconds * 1000), run)
 
+state_lines = []
+def output(line, flush=False):
+  state_lines.append(json.loads(line))
+
+def methods():
+  return state_lines[-1]["methods"]
+
 def scenario():
   # One method in one group: the startup read is all, until the profile changes.
   def single_method_settled():
-    assert lines == [live["methods"]], lines
+    assert [line["methods"] for line in state_lines] == [["keyboard-us"]], state_lines
     assert 500 not in timers and 50 not in timers, timers
     live["methods"] = ["keyboard-us", "mozc"]
-    with open(profile, "w") as file:
-      file.write("[Groups/0]\nName=Default\n[Groups/0/Items/1]\nName=mozc\n")
+    save()
     step(0.6, after_save)
   def after_save():
-    assert lines[-1] == ["keyboard-us", "mozc"], lines
+    assert methods() == ["keyboard-us", "mozc"], state_lines
     assert 500 in timers, timers
     live["current"] = "mozc"
     step(0.7, after_switch)
   def after_switch():
     # With two methods, a switch made inside an application is read on the next poll.
     assert state_lines[-1]["current"] == "mozc", state_lines
+    # A save while polling replaces the poll rather than starting a second one.
+    save()
+    step(0.4, count_polls)
+  def count_polls():
+    reads[0] = 0
+    step(2.0, polls_counted)
+  def polls_counted():
+    assert reads[0] <= 5, f"{reads[0]} reads in 2 s"
+    live["methods"], live["current"] = ["keyboard-us"], "keyboard-us"
+    save()
+    step(0.6, back_to_one)
+  def back_to_one():
+    assert methods() == ["keyboard-us"], state_lines
+    # A read that fails while the service runs is retried rather than left blank.
+    failures[0] = 1
+    save()
+    step(0.6, after_failed_read)
+  def after_failed_read():
+    assert methods() == [], state_lines
+    step(2.4, recovered)
+  def recovered():
+    assert methods() == ["keyboard-us"], state_lines
+    # Relinking the Fcitx directory moves the watch to the new target.
+    os.symlink("second", config_home + "/fcitx5.new")
+    os.replace(config_home + "/fcitx5.new", config_home + "/fcitx5")
+    step(0.6, relinked)
+  def relinked():
+    live["methods"] = ["keyboard-us", "hangul"]
+    save("second")
+    step(0.6, saved_in_new_target)
+  def saved_in_new_target():
+    assert methods() == ["keyboard-us", "hangul"], state_lines
     close_stdin()
   step(1.0, single_method_settled)
 
-state_lines = []
-def output(line, flush=False):
-  state_lines.append(json.loads(line))
-  lines.append(state_lines[-1]["methods"])
-
 with patch.dict(os.environ, {"XDG_CONFIG_HOME": config_home}), \
-     patch.object(indicator, "snapshot", side_effect=lambda bus: dict(live, methods=list(live["methods"]))), \
+     patch.object(indicator, "snapshot", side_effect=snapshot), \
      patch.object(indicator, "call", side_effect=lambda bus, method, args=None: (list(groups),) if method == "InputMethodGroups" else (_ for _ in ()).throw(AssertionError(method))), \
      patch.object(indicator.Gio, "bus_watch_name_on_connection", return_value=1), \
      patch.object(indicator.GLib, "io_add_watch", side_effect=register_reader), \
      patch.object(indicator.GLib, "timeout_add", side_effect=timeout), \
      patch("builtins.print", side_effect=output):
   step(0, scenario)
-  step(10, lambda: errors.append(AssertionError("timed out")) or close_stdin())
+  step(20, lambda: errors.append(AssertionError("timed out")) or close_stdin())
   indicator.watch(None)
 assert not errors, errors
-assert state_lines and state_lines[-1]["current"] == "mozc", state_lines
 print("ok - one input method is read once and again on a profile save, and several are polled for switches")
+print("ok - an event during polling replaces the poll, and a failed read is retried")
+print("ok - relinking the Fcitx configuration directory moves the profile watch")
 
 groups.append("Second")
 with patch.object(indicator, "call", return_value=(groups,)):
