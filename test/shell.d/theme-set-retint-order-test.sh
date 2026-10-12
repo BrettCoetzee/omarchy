@@ -41,6 +41,10 @@ if [[ $name == omarchy-theme-set-browser ]]; then
   echo "browser-for $theme" >>"$TEST_LOG"
 fi
 echo "$name" >>"$TEST_LOG"
+# With TEST_HOOK_SWITCH, the theme-set hook switches to that theme itself.
+if [[ $name == omarchy-hook && -n ${TEST_HOOK_SWITCH:-} && $2 != "$TEST_HOOK_SWITCH" ]]; then
+  OMARCHY_THEME_WAIT=1 /bin/bash "$TEST_ROOT/bin/omarchy-theme-set" "$TEST_HOOK_SWITCH" </dev/null >/dev/null 2>&1
+fi
 [[ $name != omarchy-theme-set-vscode ]]
 STUB
 cat >"$commands/noop" <<'STUB'
@@ -84,9 +88,18 @@ set_theme() {
 
 switch_theme() {
   HOME="$home" OMARCHY_PATH="$ROOT" PATH="$commands:$ROOT/bin:$PATH" XDG_RUNTIME_DIR="$test_tmp" \
-    TEST_LOG="$log" TEST_TMP="$test_tmp" TEST_STATE="$state" \
+    TEST_LOG="$log" TEST_TMP="$test_tmp" TEST_STATE="$state" TEST_ROOT="$ROOT" \
     /bin/bash "$ROOT/bin/omarchy-theme-set" "$1" </dev/null >"$test_tmp/stdout" 2>"$test_tmp/stderr" ||
     fail "theme selection completes" "$(cat "$test_tmp/stderr")"
+}
+
+# The held browser retint has started, so its batch holds the retints.
+wait_held() {
+  for attempt in {1..250}; do
+    [[ ! -f $test_tmp/held ]] || return 0
+    sleep 0.02
+  done
+  fail "the held browser retint starts"
 }
 
 wait_logged() {
@@ -145,6 +158,7 @@ pass "OMARCHY_THEME_WAIT=1 waits for every retint and reports failures on stderr
 # and then be overwritten by alpha's late write.
 rm -f "$test_tmp/release" "$test_tmp/held"
 TEST_HOLD_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
+wait_held
 (sleep 0.3; touch "$test_tmp/release") &
 TEST_HOLD_THEME=alpha OMARCHY_THEME_WAIT=1 OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme beta
 wait
@@ -157,6 +171,7 @@ pass "retint batches from quick switches run in order"
 # Beta's batch finds its theme already replaced and leaves the apps alone.
 rm -f "$test_tmp/release" "$test_tmp/held"
 TEST_HOLD_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
+wait_held
 TEST_HOLD_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme beta
 TEST_HOLD_THEME=alpha OMARCHY_THEME_SKIP_BACKGROUND=1 switch_theme alpha
 touch "$test_tmp/release"
@@ -165,3 +180,17 @@ wait_for_detached_work
   fail "a batch whose theme was replaced while it waited skips its retints" "$(cat "$log")"
 (( $(grep -cx 'omarchy-hook' "$log") == 3 )) || fail "every switch still runs the theme-set hook" "$(cat "$log")"
 pass "a superseded retint batch leaves the apps to the newer theme"
+
+# A theme-set hook that switches the theme waits for that switch's retints,
+# which must not wait in turn for the batch that ran the hook.
+rm -f "$test_tmp/release" "$test_tmp/held"
+touch "$test_tmp/release"
+TEST_HOOK_SWITCH=beta OMARCHY_THEME_SKIP_BACKGROUND=1 set_theme alpha
+for attempt in {1..250}; do
+  (( $(grep -cx 'omarchy-hook' "$log") >= 2 )) && break
+  sleep 0.02
+done
+wait_for_detached_work
+[[ $(<"$state/theme.name") == "beta" ]] || fail "the hook's switch applies"
+grep -qx 'browser-for beta' "$log" || fail "a switch made from a theme-set hook runs its retints" "$(cat "$log")"
+pass "a theme-set hook can switch the theme without deadlocking the retints"

@@ -562,12 +562,13 @@ apply_other_theme_commands() {
   if [[ $(stat -Lc '%d:%i' "$CURRENT_THEME_PATH" 2>/dev/null) == "$APPLIED_THEME_ID" ]]; then
     run_parallel "${other_theme_commands[@]}"
   fi
+  exec 8>&-
 
-  # Call hook on theme set
-  omarchy-hook theme-set "$THEME_NAME" >/dev/null 8>&-
+  # Call hook on theme set. The lock is released first: a hook may switch the
+  # theme itself, and that switch's batch needs the lock.
+  omarchy-hook theme-set "$THEME_NAME" >/dev/null
 
   report_failed_theme_commands "$detached"
-  exec 8>&-
 }
 
 if [[ $THEME_HEADLESS != "1" ]]; then
