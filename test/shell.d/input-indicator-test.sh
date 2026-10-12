@@ -153,7 +153,7 @@ def exercise():
 state = {"methods": ["keyboard-us", "pinyin"], "current": "keyboard-us", "name": "English", "label": "en", "language": "en"}
 loop = Mock()
 loop.run.side_effect = exercise
-with patch.object(indicator.GLib, "MainLoop", return_value=loop), patch.object(indicator.GLib, "io_add_watch", side_effect=register), patch.object(indicator.GLib, "timeout_add", return_value=1), patch.object(indicator.GLib, "source_remove"), patch.object(indicator.os, "read", return_value=b"cycle\n"), patch.object(indicator, "snapshot", return_value=state), patch.object(indicator.subprocess, "run", side_effect=[subprocess.CalledProcessError(1, "hyprctl"), subprocess.CompletedProcess([], 0, stdout='{"keyboards": []}')]), patch.object(indicator, "call") as call, patch("builtins.print"):
+with patch.object(indicator.GLib, "MainLoop", return_value=loop), patch.object(indicator.GLib, "io_add_watch", side_effect=register), patch.object(indicator.GLib, "timeout_add", return_value=1), patch.object(indicator.GLib, "source_remove"), patch.object(indicator.os, "read", return_value=b"cycle\n"), patch.object(indicator, "snapshot", return_value=state), patch.object(indicator.subprocess, "run", side_effect=[subprocess.CalledProcessError(1, "hyprctl"), subprocess.CompletedProcess([], 0, stdout='{"keyboards": []}')]), patch.object(indicator, "call") as call, patch.object(indicator, "follow"), patch("builtins.print"):
   indicator.watch(None)
   assert call.call_args.args[1] == "SetCurrentIM"
 print("ok - a failed compositor query leaves the bar click reader alive for the next request")
@@ -173,6 +173,95 @@ assert indicator.cycle_choice(state, keyboards, -1) == ("keyboard-us", 1)
 assert indicator.cycle_choice({"methods": ["keyboard-us", "mozc", "hangul"], "current": "keyboard-us"}, [], -1) == ("hangul", None)
 assert indicator.layout_switches(keyboards, step=-1)[0][-1] == "1"
 print("ok - cycling back walks the same choices in reverse")
+
+# The reader in a real GLib loop, against a real profile file: Fcitx itself is
+# replaced by `live`, which a configuration change edits before saving.
+import sys
+import tempfile
+config_home = tempfile.mkdtemp()
+os.makedirs(config_home + "/fcitx5")
+profile = config_home + "/fcitx5/profile"
+open(profile, "w").write("[Groups/0]\nName=Default\n")
+live = {"methods": ["keyboard-us"], "current": "keyboard-us", "name": "English", "label": "en", "language": "en"}
+groups = ["Default"]
+lines, timers, reader = [], [], {}
+real_timeout = indicator.GLib.timeout_add
+
+def timeout(interval, fn):
+  timers.append(interval)
+  return real_timeout(interval, fn)
+
+real_io_add_watch = indicator.GLib.io_add_watch
+def register_reader(source, *args):
+  # GLib's own loop.run() watches a signal pipe through the same call.
+  if source is not sys.stdin:
+    return real_io_add_watch(source, *args)
+  reader["read"] = args[-1]
+  return 1
+
+# The shell closing stdin is what ends the reader.
+def close_stdin():
+  with patch.object(indicator.os, "read", return_value=b""):
+    reader["read"](None, None)
+
+# GLib swallows exceptions raised in callbacks, so keep them for the end.
+errors = []
+def step(seconds, then):
+  def run():
+    try:
+      then()
+    except Exception as error:
+      errors.append(error)
+      close_stdin()
+    return False
+  real_timeout(int(seconds * 1000), run)
+
+def scenario():
+  # One method in one group: the startup read is all, until the profile changes.
+  def single_method_settled():
+    assert lines == [live["methods"]], lines
+    assert 500 not in timers and 50 not in timers, timers
+    live["methods"] = ["keyboard-us", "mozc"]
+    with open(profile, "w") as file:
+      file.write("[Groups/0]\nName=Default\n[Groups/0/Items/1]\nName=mozc\n")
+    step(0.6, after_save)
+  def after_save():
+    assert lines[-1] == ["keyboard-us", "mozc"], lines
+    assert 500 in timers, timers
+    live["current"] = "mozc"
+    step(0.7, after_switch)
+  def after_switch():
+    # With two methods, a switch made inside an application is read on the next poll.
+    assert state_lines[-1]["current"] == "mozc", state_lines
+    close_stdin()
+  step(1.0, single_method_settled)
+
+state_lines = []
+def output(line, flush=False):
+  state_lines.append(json.loads(line))
+  lines.append(state_lines[-1]["methods"])
+
+with patch.dict(os.environ, {"XDG_CONFIG_HOME": config_home}), \
+     patch.object(indicator, "snapshot", side_effect=lambda bus: dict(live, methods=list(live["methods"]))), \
+     patch.object(indicator, "call", side_effect=lambda bus, method, args=None: (list(groups),) if method == "InputMethodGroups" else (_ for _ in ()).throw(AssertionError(method))), \
+     patch.object(indicator.Gio, "bus_watch_name_on_connection", return_value=1), \
+     patch.object(indicator.GLib, "io_add_watch", side_effect=register_reader), \
+     patch.object(indicator.GLib, "timeout_add", side_effect=timeout), \
+     patch("builtins.print", side_effect=output):
+  step(0, scenario)
+  step(10, lambda: errors.append(AssertionError("timed out")) or close_stdin())
+  indicator.watch(None)
+assert not errors, errors
+assert state_lines and state_lines[-1]["current"] == "mozc", state_lines
+print("ok - one input method is read once and again on a profile save, and several are polled for switches")
+
+groups.append("Second")
+with patch.object(indicator, "call", return_value=(groups,)):
+  assert indicator.Indicator(None).switchable(["keyboard-us"])
+  groups.pop()
+  assert not indicator.Indicator(None).switchable(["keyboard-us"])
+  assert indicator.Indicator(None).switchable(["keyboard-us", "mozc"])
+print("ok - a second group keeps a single-method group polled, since a group switch has no signal either")
 
 PY
 
