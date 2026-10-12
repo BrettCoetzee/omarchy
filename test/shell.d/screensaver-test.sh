@@ -146,11 +146,15 @@ stop_screensaver
 
 # omarchy-system-lock stops ttfx and waits for it before closing the window;
 # an effect ended that way starts no replacement.
-start_screensaver org.omarchy.screensaver 0.3
-sleep 1
-xargs -r kill 2>/dev/null <"$tmpdir/ttfx.pids" || true
-sleep 0.3
+# The effect runs until it is signalled, so the signal lands on a live one.
+start_screensaver org.omarchy.screensaver
+for (( attempt = 0; attempt < 100; attempt++ )); do
+  [[ -s $tmpdir/ttfx.pids ]] && break
+  sleep 0.05
+done
+[[ -s $tmpdir/ttfx.pids ]] || fail "the first effect starts"
 effects=$(wc -l <"$tmpdir/ttfx")
+xargs -r kill <"$tmpdir/ttfx.pids"
 sleep 1
 (( $(wc -l <"$tmpdir/ttfx") == effects )) || fail "an effect stopped from outside starts no other" "$(<"$tmpdir/order")"
 pass "an effect stopped from outside, as locking does, starts no other"
