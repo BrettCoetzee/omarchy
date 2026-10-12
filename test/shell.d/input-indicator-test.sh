@@ -394,7 +394,45 @@ with patch.dict(os.environ, {"XDG_CONFIG_HOME": "/xdg", "FCITX_CONFIG_HOME": "/f
   assert indicator.profile_path() == "/fcitx/profile"
   del os.environ["FCITX_CONFIG_HOME"]
   assert indicator.profile_path() == "/xdg/fcitx5/profile"
-print("ok - the watched profile follows Fcitx's FCITX_CONFIG_HOME override")
+  os.environ["FCITX_CONFIG_HOME"] = "/fcitx/link/../cleaned"
+  assert indicator.profile_path() == "/fcitx/cleaned/profile"
+print("ok - the watched profile follows Fcitx's FCITX_CONFIG_HOME override, cleaned the way Fcitx cleans it")
+
+# A link that vanishes mid-resolution, as a relink in progress makes it, is
+# watched as an entry rather than failing the whole watch.
+race_root = tempfile.mkdtemp()
+os.symlink("elsewhere", race_root + "/fcitx5")
+with patch.dict(os.environ, {"XDG_CONFIG_HOME": race_root}), \
+     patch.object(indicator.os, "readlink", side_effect=FileNotFoundError("relinked")):
+  assert (race_root, "fcitx5") in indicator.watched_entries()
+
+# A configuration that does not exist yet is watched from its nearest existing
+# directory, and its profile is seen once Fcitx first saves it.
+fresh_root = tempfile.mkdtemp()
+events = []
+with patch.dict(os.environ, {"XDG_CONFIG_HOME": fresh_root + "/config"}):
+  assert indicator.watched_entries()[-1] == (fresh_root, "config"), indicator.watched_entries()
+  # A context of its own, clear of the sources the reader above left behind.
+  import time
+  context = indicator.GLib.MainContext.new()
+  context.push_thread_default()
+  profile_watch = indicator.ProfileWatch(lambda: events.append("changed"))
+  def run_until(seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+      context.iteration(False)
+      time.sleep(0.01)
+  os.makedirs(fresh_root + "/config")
+  run_until(0.3)
+  os.makedirs(fresh_root + "/config/fcitx5")
+  run_until(0.3)
+  events.clear()
+  with open(fresh_root + "/config/fcitx5/profile", "w") as file:
+    file.write("[Groups/0]\n")
+  run_until(0.3)
+  assert events, "the first save of a new profile is seen"
+  context.pop_thread_default()
+print("ok - a missing configuration is watched until it exists, and a vanishing link keeps its watch")
 
 groups.append("Second")
 with patch.object(indicator, "call", return_value=(groups,)):

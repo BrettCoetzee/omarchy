@@ -138,10 +138,11 @@ class Indicator:
 
 
 def profile_path():
-  # Fcitx's own lookup: FCITX_CONFIG_HOME, else $XDG_CONFIG_HOME/fcitx5.
+  # Fcitx's own lookup: FCITX_CONFIG_HOME, else $XDG_CONFIG_HOME/fcitx5, cleaned
+  # lexically the way Fcitx cleans it before any link is followed.
   directory = os.environ.get("FCITX_CONFIG_HOME") or os.path.join(
     os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "fcitx5")
-  return os.path.join(directory, "profile")
+  return os.path.join(os.path.normpath(directory), "profile")
 
 
 def watched_entries(hops=40):
@@ -163,14 +164,20 @@ def watched_entries(hops=40):
     if not home.startswith(current.rstrip("/") + "/"):
       entries.append((current, part))
     candidate = os.path.join(current, part)
-    if os.path.islink(candidate) and hops > 0:
+    try:
+      target = os.readlink(candidate) if hops > 0 else None
+    except OSError:
+      target = None
+    if target is not None:
       hops -= 1
-      target = os.readlink(candidate)
       if target.startswith("/"):
         current = "/"
       pending = target.split("/") + pending
-    else:
+    elif os.path.lexists(candidate):
       current = candidate
+    else:
+      # Nothing further exists yet; the watch on this entry sees it arrive.
+      break
   return list(dict.fromkeys(entries))
 
 
@@ -183,10 +190,12 @@ class ProfileWatch:
     self.bind()
 
   def bind(self):
+    # Resolve before dropping the old watches, so a failure keeps them.
+    entries = watched_entries()
     for monitor in self.monitors:
       monitor.cancel()
     self.monitors = []
-    for directory, name in watched_entries():
+    for directory, name in entries:
       monitor = Gio.File.new_for_path(directory).monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
       monitor.connect("changed", self.entry_changed, name)
       self.monitors.append(monitor)
