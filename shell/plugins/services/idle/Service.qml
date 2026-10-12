@@ -38,6 +38,7 @@ Item {
   property bool idledThisCycle: false
   property bool screensaverStartedThisCycle: false
   property bool blankedOnBattery: false
+  property bool wakeAfterBlank: false
   property string lastEvent: "starting"
   property string lastEventAt: ""
   property var screensaverWindows: ({})
@@ -107,7 +108,10 @@ Item {
   function handlePowerSourceChanged() {
     if (!UPower.onBattery || !root.idledThisCycle || root.blankedOnBattery) return
     if (!root.screensaverStartedThisCycle || root.screensaverWindowCount === 0) return
-    blankOnBattery("unplugged-during-screensaver")
+    // Someone is already at the machine (moving the mouse leaves the
+    // screensaver up): close it and end the cycle rather than blanking.
+    if (!idleMonitor.isIdle) cancelIdleCycle("unplugged-while-active")
+    else blankOnBattery("unplugged-during-screensaver")
     runProcess(screensaverStopProcess, "screensaver-stop", "pkill -TERM -f '[b]in/omarchy-screensaver$'")
   }
 
@@ -160,9 +164,12 @@ Item {
     lockTimer.stop()
     screensaverLaunchGraceTimer.stop()
 
-    // Waking must be the last display action, so stop a blank still running.
-    if (blankProcess.running) blankProcess.running = false
-    if (root.idledThisCycle) runProcess(wakeProcess, "wake", "omarchy-system-wake")
+    // Waking must be the last display action, so a blank still running is
+    // left to finish and the wake follows it.
+    if (root.idledThisCycle) {
+      if (blankProcess.running) root.wakeAfterBlank = true
+      else runProcess(wakeProcess, "wake", "omarchy-system-wake")
+    }
 
     root.idledThisCycle = false
     root.screensaverStartedThisCycle = false
@@ -363,7 +370,12 @@ Item {
 
   Process {
     id: blankProcess
-    onExited: function(exitCode, exitStatus) { root.logEvent("process-exit", "battery-blank exitCode=" + exitCode + " status=" + exitStatus) }
+    onExited: function(exitCode, exitStatus) {
+      root.logEvent("process-exit", "battery-blank exitCode=" + exitCode + " status=" + exitStatus)
+      if (!root.wakeAfterBlank) return
+      root.wakeAfterBlank = false
+      root.runProcess(wakeProcess, "wake", "omarchy-system-wake")
+    }
   }
 
   Process {
