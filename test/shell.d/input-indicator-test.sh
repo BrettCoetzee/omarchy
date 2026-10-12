@@ -456,6 +456,25 @@ with patch.dict(os.environ, {"HOME": plain_root + "/home"}):
   assert indicator.watched_entries() == [(plain_root + "/home/.config", "fcitx5"),
                                          (plain_root + "/home/.config/fcitx5", "profile")], indicator.watched_entries()
 
+# Moving that plain ~/.config aside for a link to a new one is still seen,
+# through the event on the watched directory itself.
+moved = []
+with patch.dict(os.environ, {"HOME": plain_root + "/home"}):
+  context = indicator.GLib.MainContext.new()
+  context.push_thread_default()
+  plain_watch = indicator.ProfileWatch(lambda: moved.append("changed"))
+  os.rename(plain_root + "/home/.config", plain_root + "/home/.config.old")
+  os.makedirs(plain_root + "/dotfiles/fcitx5")
+  os.symlink("../dotfiles", plain_root + "/home/.config")
+  run_until(0.3)
+  assert moved, "moving ~/.config aside is seen"
+  moved.clear()
+  with open(plain_root + "/dotfiles/fcitx5/profile", "w") as file:
+    file.write("[Groups/0]\n")
+  run_until(0.3)
+  assert moved, "a save in the linked configuration is seen"
+  context.pop_thread_default()
+
 # A link written with a trailing slash still leads to the profile's directory.
 slash_root = tempfile.mkdtemp()
 os.makedirs(slash_root + "/home/.config/first")

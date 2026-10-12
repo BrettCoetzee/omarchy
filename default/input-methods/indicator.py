@@ -231,15 +231,18 @@ class ProfileWatch:
       self.monitors = []
       for directory, name in entries:
         monitor = Gio.File.new_for_path(directory).monitor_directory(Gio.FileMonitorFlags.WATCH_MOVES, None)
-        monitor.connect("changed", self.entry_changed, name)
+        monitor.connect("changed", self.entry_changed, directory, name)
         self.monitors.append(monitor)
       armed, entries = entries, watched_entries(self.owner)
       if entries == armed:
         return
     # Still moving: whoever is changing it will send another event.
 
-  def entry_changed(self, monitor, file, other, event, name):
-    if name not in (file.get_basename(), other.get_basename() if other else None):
+  def entry_changed(self, monitor, file, other, event, directory, name):
+    # The watched directory itself moving away (a real ~/.config moved aside
+    # for a link, say) arrives as an event on the directory, not the entry.
+    moved = file.get_path() == directory
+    if not moved and name not in (file.get_basename(), other.get_basename() if other else None):
       return
     # A relinked or replaced entry may resolve somewhere new.
     self.bind()
