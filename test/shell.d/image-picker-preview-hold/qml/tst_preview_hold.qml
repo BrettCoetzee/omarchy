@@ -68,6 +68,16 @@ Item {
       compare(changes.count, 1, "and went off once, at the end")
     }
 
+    function test_a_preload_during_the_grace_period_extends_it() {
+      hold.active = true
+      hold.active = false
+      wait(150)
+      hold.warm()
+      wait(100)
+      compare(hold.held, true, "still held past the close's own deadline")
+      tryCompare(hold, "held", false, 1000)
+    }
+
     function test_a_preload_holds_them_for_the_open_that_follows() {
       hold.warm()
       compare(hold.held, true)
