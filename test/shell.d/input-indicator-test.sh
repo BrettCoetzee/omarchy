@@ -475,6 +475,27 @@ with patch.dict(os.environ, {"HOME": plain_root + "/home"}):
   assert moved, "a save in the linked configuration is seen"
   context.pop_thread_default()
 
+# With ~/.config linked into a dotfiles tree, replacing the whole tree is seen
+# through the watch on the tree's own directory.
+tree_root = tempfile.mkdtemp()
+os.makedirs(tree_root + "/home/dotfiles/config/fcitx5")
+os.symlink("dotfiles/config", tree_root + "/home/.config")
+replaced = []
+with patch.dict(os.environ, {"HOME": tree_root + "/home"}):
+  context = indicator.GLib.MainContext.new()
+  context.push_thread_default()
+  tree_watch = indicator.ProfileWatch(lambda: replaced.append("changed"))
+  os.rename(tree_root + "/home/dotfiles", tree_root + "/home/dotfiles.old")
+  os.makedirs(tree_root + "/home/dotfiles/config/fcitx5")
+  run_until(0.3)
+  assert replaced, "replacing the dotfiles tree is seen"
+  replaced.clear()
+  with open(tree_root + "/home/dotfiles/config/fcitx5/profile", "w") as file:
+    file.write("[Groups/0]\n")
+  run_until(0.3)
+  assert replaced, "a save in the replacement tree is seen"
+  context.pop_thread_default()
+
 # A link written with a trailing slash still leads to the profile's directory.
 slash_root = tempfile.mkdtemp()
 os.makedirs(slash_root + "/home/.config/first")

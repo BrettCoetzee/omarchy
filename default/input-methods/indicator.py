@@ -172,10 +172,12 @@ def profile_path(owner=None):
 def watched_entries(owner=None, hops=40):
   # Saves rename a new profile into place, and a dotfile manager may link the
   # profile, its directory or the configuration home elsewhere, chain links, or
-  # replace a linked directory. Resolve the path the way the kernel does, one
-  # component at a time, and watch each directory it passes through for the one
-  # entry it looks up there when that entry is a link, is missing, or is the
-  # profile or its directory.
+  # replace a linked directory or any directory above the profile. Resolve the
+  # path the way the kernel does, one component at a time, and watch each
+  # directory it passes through below the home directory, for the entry it
+  # looks up there and for the directory itself moving away. The home directory
+  # and those above it are busy and change with a session rather than a save,
+  # so they are watched only for an entry that is a link or missing.
   home = os.path.realpath((owner[0] if owner else os.environ).get("HOME") or os.path.expanduser("~"))
   entries = []
   current, pending = "/", profile_path(owner).split("/")
@@ -191,13 +193,8 @@ def watched_entries(owner=None, hops=40):
       target = os.readlink(candidate) if hops > 0 else None
     except OSError:
       target = None
-    # The way down to the home directory changes with a new session, not a
-    # save, and so does a real directory above the profile's own: watching the
-    # busy home directory for those would wake on every file written there.
-    toward_home = candidate == home or home.startswith(candidate + "/")
-    remaining = [item for item in pending if item not in ("", ".")]
-    settled = target is None and os.path.isdir(candidate) and len(remaining) > 1
-    if not toward_home and not settled:
+    above_home = current == home or home.startswith(current.rstrip("/") + "/")
+    if not above_home or target is not None or not os.path.lexists(candidate):
       entries.append((current, part))
     if target is not None:
       hops -= 1
