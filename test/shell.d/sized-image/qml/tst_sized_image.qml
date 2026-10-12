@@ -44,6 +44,22 @@ Item {
     url: root.narrowImage
   }
 
+  SizedImage {
+    id: art
+    width: 40
+    height: 40
+    crop: true
+    url: root.bigImage
+  }
+
+  SizedImage {
+    id: stripArt
+    width: 60
+    height: 60
+    crop: true
+    url: root.narrowImage
+  }
+
   // A 400x10 SVG strip.
   SizedImage {
     id: vector
@@ -101,6 +117,26 @@ Item {
       compare(image.paintedHeight, 2.5, "without losing its aspect ratio")
     }
 
+    function test_a_crop_covers_the_box_from_a_small_bitmap() {
+      tryCompare(art, "status", Image.Ready)
+      var size = bitmap(art)
+      var bound = Math.ceil(80 * Screen.devicePixelRatio)
+      compare(size.width, bound, "decoded within twice the box")
+      verify(size.height >= Math.ceil(40 * Screen.devicePixelRatio), "and still covers it at full resolution: " + size.width + "x" + size.height)
+      var rect = painted(art)
+      compare(rect.height, 40, "the short side fills the box")
+      verify(rect.width > 40, "the long side runs past it")
+      compare(rect.x, (40 - rect.width) / 2, "centred")
+      verify(art.clip, "and is clipped to the box")
+    }
+
+    function test_a_crop_never_decodes_bigger_than_the_file() {
+      tryCompare(stripArt, "status", Image.Ready)
+      var size = bitmap(stripArt)
+      verify(size.width <= 400 && size.height <= 10, "a narrow strip is not enlarged: " + size.width + "x" + size.height)
+      compare(painted(stripArt).height, 60, "yet still covers the box when drawn")
+    }
+
     function test_clipboard_svg_captures_count_as_svgs() {
       var probe = Qt.createQmlObject('import "../../../../shell/Ui"; SizedImage {}', root)
       probe.url = "file:///state/clipboard-images/abc.svg+xml"
@@ -111,6 +147,8 @@ Item {
       verify(!probe.scalable, "a raster capture")
       probe.url = "file:///home/me/svg/shot.png"
       verify(!probe.scalable, "a raster file under a directory named svg")
+      probe.url = "file:///home/me/drawing.svg.png"
+      verify(!probe.scalable, "a PNG exported from an SVG")
       probe.destroy()
     }
 
