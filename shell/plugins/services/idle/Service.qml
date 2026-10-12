@@ -40,6 +40,7 @@ Item {
   property bool blankedOnBattery: false
   property bool wakePending: false
   property bool stopPending: false
+  property bool stopRequested: false
   property string lastEvent: "starting"
   property string lastEventAt: ""
   property var screensaverWindows: ({})
@@ -72,6 +73,7 @@ Item {
   }
 
   function launchScreensaver() {
+    root.stopRequested = false
     root.screensaverStartedThisCycle = true
     screensaverLaunchGraceTimer.restart()
     runProcess(screensaverProcess, "screensaver", "[[ $(omarchy-shell lock isLocked 2>/dev/null) == \"true\" ]] || omarchy-launch-screensaver")
@@ -126,6 +128,7 @@ Item {
   // monitor focus once they have all closed; a window it opens after this is
   // closed when it maps (handleScreensaverWindowOpened), or by a rerun.
   function stopScreensavers() {
+    root.stopRequested = true
     if (screensaverStopProcess.running) {
       root.stopPending = true
       return
@@ -137,10 +140,7 @@ Item {
   function handlePowerSourceChanged() {
     if (!UPower.onBattery || !root.idledThisCycle || root.blankedOnBattery) return
     if (!root.screensaverStartedThisCycle || root.screensaverWindowCount === 0) return
-    // Someone is already at the machine (moving the mouse leaves the
-    // screensaver up): close it and end the cycle rather than blanking.
-    if (!idleMonitor.isIdle) cancelIdleCycle("unplugged-while-active")
-    else blankOnBattery("unplugged-during-screensaver")
+    blankOnBattery("unplugged-during-screensaver")
     stopScreensavers()
   }
 
@@ -215,8 +215,9 @@ Item {
   function handleScreensaverWindowOpened(address) {
     setScreensaverWindow(address, true)
     screensaverLaunchGraceTimer.stop()
-    // Unplugged while it was still starting, or opened after blanking began.
-    if (root.blankedOnBattery) stopScreensavers()
+    // Opened by the launcher after the screensavers were stopped, or unplugged
+    // while it was still starting.
+    if (root.stopRequested) stopScreensavers()
     else handlePowerSourceChanged()
   }
 
@@ -357,6 +358,17 @@ Item {
     timeout: Math.max(1, root.firstIdleTimeoutSeconds)
     respectInhibitors: true
     onIsIdleChanged: root.handleIdleChanged()
+  }
+
+  // While blanked on battery, any input after a second of quiet wakes the
+  // displays, even when the main monitor already counts as active (input while
+  // the screensaver was up, or its own launch) and so reports no change.
+  IdleMonitor {
+    id: blankWakeMonitor
+    enabled: root.blankedOnBattery
+    timeout: 1
+    respectInhibitors: false
+    onIsIdleChanged: if (!isIdle && root.blankedOnBattery) root.cancelIdleCycle("activity")
   }
 
   Timer {
