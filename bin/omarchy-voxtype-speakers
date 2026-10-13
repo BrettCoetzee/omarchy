@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# omarchy:summary=Transcribe what is playing through the speakers, such as the other side of a call
+# omarchy:args=<start|stop>
+
+# Voxtype records from the microphone. For this recording only, its capture
+# stream is relinked to the default output's monitor, so the same daemon,
+# model, waveform and typing are reused. The links are swapped with pw-link
+# rather than `pactl move-source-output`, because WirePlumber remembers moved
+# streams and later microphone dictation would keep recording the speakers.
+# The default source is left alone so apps in a call keep the microphone.
+
+voxtype_inputs() {
+  pw-link -i | grep -E '^alsa_capture\.voxtype[^:]*:'
+}
+
+# Prints the output ports currently linked into a Voxtype input port.
+linked_outputs() {
+  pw-link -l | awk -v port="$1" '
+    /^[^ ]/ { current = $0 }
+    current == port && /\|<-/ { sub(/^ *\|<- */, ""); print }
+  '
+}
+
+start() {
+  local sink inputs="" input output monitors
+
+  voxtype record start || return 1
+  sink=$(pactl get-default-sink)
+
+  # Voxtype opens its capture stream just after the recording starts.
+  for ((attempt = 0; attempt < 40; attempt++)); do
+    inputs=$(voxtype_inputs)
+    if [[ -n $inputs ]]; then
+      break
+    fi
+    sleep 0.025
+  done
+
+  monitors=$(pw-link -o | grep -F "$sink:monitor_")
+  if [[ -z $inputs || -z $monitors ]]; then
+    voxtype record cancel
+    omarchy-notification-send -t 3000 "Speaker dictation" "Couldn't connect Voxtype to the speaker output"
+    return 1
+  fi
+
+  while read -r input; do
+    while read -r output; do
+      [[ -z $output ]] || pw-link -d "$output" "$input" 2> /dev/null
+    done <<< "$(linked_outputs "$input")"
+
+    # Match channels by name (FL to FL); a channel layout that doesn't match,
+    # such as a mono capture stream, gets every monitor channel mixed in.
+    if grep -qxF "$sink:monitor_${input##*:input_}" <<< "$monitors"; then
+      pw-link "$sink:monitor_${input##*:input_}" "$input" 2> /dev/null
+    else
+      while read -r output; do
+        pw-link "$output" "$input" 2> /dev/null
+      done <<< "$monitors"
+    fi
+  done <<< "$inputs"
+}
+
+case "${1:-}" in
+  start) start ;;
+  stop) omarchy-dictation-voxtype stop ;;
+  *) echo "Usage: omarchy voxtype speakers <start|stop>" >&2; exit 1 ;;
+esac
